@@ -1,6 +1,12 @@
 # ComfyUI wrapper nodes for [WanVideo](https://github.com/Wan-Video/Wan2.1) and related models.
 
 
+## Wan-Animate-2 and INT8 ConvRot models
+
+- [Wan-Animate-2](https://github.com/Wan-Video/Wan-Animate-2) with the new `WanVideo Animate2 Embeds (Wan-Animate-2)` node: it takes the reference image and the driving video as is (no pose/face extraction) and works with the regular `WanVideo Sampler`. Supports the base and distilled models (`log_scale` -1.3 for the distilled one), CFG with upstream's skipped uncond block, windowed long generation like upstream, context windows, and caching the pose branch (it never changes during sampling) on CPU/GPU in bf16 or int8. See `example_workflows/wanvideo_WanAnimate2_example_01.json`.
+- `WanVideo Model Loader` loads INT8 and INT8 ConvRot checkpoints in ComfyUI's mixed precision format (`comfy_quant` metadata) automatically with quantization `disabled`, using INT8 matmul through comfy_kitchen (ships with recent ComfyUI). `int8_dequant` dequantizes the weights on the fly instead. Unmerged LoRAs and block swap work with them, merged LoRAs don't.
+
+
 ## Memory use update (again)
 
 I've made everythign less reliant on torch.compile for VRAM efficiency, so things should work better even without it. Also figured workaround for some issues when using compile that made first run use drastically more VRAM, issue I battled with myself a lot.

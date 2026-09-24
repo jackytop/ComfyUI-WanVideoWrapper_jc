@@ -14,6 +14,7 @@ except Exception:
     pass
 
 from .attention import attention
+from .wananimate2.animate2 import animate2_attention
 import numpy as np
 from tqdm import tqdm
 import gc
@@ -170,7 +171,7 @@ class EmbedND_RifleX(nn.Module):
                 i, #f h w
                 self.theta, 
                 self.num_frames, 
-                self.k,
+                self.k or 0,
                 ntk_factor[i])
             for i in range(n_axes)],
             dim=-3,
@@ -1024,6 +1025,7 @@ class WanAttentionBlock(nn.Module):
         longcat_num_cond_latents=0, longcat_avatar_options=None, #longcat image cond amount
         x_onetoall_ref=None, onetoall_freqs=None, onetoall_ref=None, onetoall_ref_scale=1.0, #one-to-all
         e_tr=None, tr_num=0, tr_start=0, #token replacement
+        animate2_attn=None, #Wan-Animate-2 pose branch K/V
         attention_mode_override=None, frame_tokens=None, transformer_options={}
     ):
         r"""
@@ -1180,7 +1182,15 @@ class WanAttentionBlock(nn.Module):
                       and inner_t is None
                       and x_ip is None  # Don't split when using IP-Adapter
                       )
-        if split_attn and chunked_self_attention:
+        if animate2_attn is not None: # Wan-Animate-2: frame j also attends pose frame j-1
+            hw = animate2_attn["hw"]
+            if animate2_attn["ref_strength"] != 1.0:
+                v[:, :hw] *= animate2_attn["ref_strength"] # frame 0 is the reference image slot
+            y = animate2_attention(q, k, v, animate2_attn["k"], animate2_attn["v"], animate2_attn["frames"], hw,
+                                   attention_mode=attention_mode_override or self.self_attn.attention_mode,
+                                   log_scale=animate2_attn["log_scale"], heads=self.num_heads)
+            y = self.self_attn.o(y.flatten(2))
+        elif split_attn and chunked_self_attention:
             y = self.self_attn.forward_split(q, k, v, seq_lens, grid_sizes, seq_chunks)
         elif ref_target_masks is not None: #multi/infinite talk
             y, x_ref_attn_map = self.self_attn.forward_multitalk(q, k, v, seq_lens, grid_sizes, ref_target_masks)
@@ -1466,6 +1476,30 @@ class WanAttentionBlock(nn.Module):
         mod_x = torch.addcmul(shift_mlp, self.norm2(x.to(shift_mlp.dtype)), 1 + scale_mlp)
         y = self.ffn_chunked(mod_x, num_chunks=1)
         return x.addcmul(y, gate_mlp)
+
+    # Wan-Animate-2 pose branch: dense self-attention over the pose tokens only, its K/V feed the generation branch
+    def forward_animate2_pose(self, x, e, freqs, context, clip_embed=None, attention_mode_override=None, transformer_options={}):
+        input_dtype = x.dtype
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.get_mod(e.to(x.device), self.modulation)
+        input_x = self.modulate(self.norm1(x.to(shift_msa.dtype)), shift_msa, scale_msa).to(input_dtype)
+        q = self.self_attn.qkv_fn_q_with_rope(input_x, freqs)
+        k = self.self_attn.qkv_fn_k_with_rope(input_x, freqs)
+        v = self.self_attn.qkv_fn_v(input_x)
+        del input_x
+        y = self.self_attn.forward(q, k, v, None, attention_mode_override=attention_mode_override, transformer_options=transformer_options)
+        del q
+        x = x.addcmul(y, gate_msa).to(input_dtype)
+        del y
+        x = x + self.cross_attn(self.norm3(x.to(self.norm3.weight.dtype)).to(input_dtype), context, clip_embed=clip_embed).to(input_dtype)
+        mod_x = torch.addcmul(shift_mlp, self.norm2(x.to(shift_mlp.dtype)), 1 + scale_mlp)
+        x = x.addcmul(self.ffn_chunked(mod_x.to(input_dtype)).to(gate_mlp.dtype), gate_mlp).to(input_dtype)
+        return x, k, v
+
+    def animate2_pose_kv(self, x, e, freqs):
+        # K/V re-projected from a cached pose branch block input
+        shift_msa, scale_msa = self.get_mod(e.to(x.device), self.modulation)[:2]
+        input_x = self.modulate(self.norm1(x.to(shift_msa.dtype)), shift_msa, scale_msa).to(x.dtype)
+        return self.self_attn.qkv_fn_k_with_rope(input_x, freqs), self.self_attn.qkv_fn_v(input_x)
 
 class VaceWanAttentionBlock(WanAttentionBlock):
     def __init__(
@@ -2303,6 +2337,90 @@ class WanModel(torch.nn.Module):
 
         return freqs
 
+    #region Wan-Animate-2
+    def animate2_prepare(self, animate2_input, grid_sizes, ntk_alphas=[1, 1, 1]):
+        """Sets up the pose branch for this model call: inputs, fixed timestep modulation, context and RoPE."""
+        f, h, w = grid_sizes[0].tolist()
+        device, dtype = self.main_device, self.base_dtype
+        # upstream pads the pose clips to the generation length, frames past its end just attend the generation tokens
+        pose_latents = animate2_input["pose_latents"]
+        pose_frames = min(pose_latents.shape[1], f - 1)
+        pose_latents = pose_latents[:, :pose_frames].to(device, torch.float32)
+
+        cache = animate2_input.get("cache", None)
+        cached = False
+        if cache is not None:
+            cache.select(pose_latents)
+            cached = cache.filled(len(self.blocks))
+
+        x_pose = context_pose = clip_embed_pose = None
+        if not cached:
+            # 36 channels = [latents | mask | latents], the mask is all ones as every pose frame is known
+            x_pose = torch.cat([pose_latents, torch.ones_like(pose_latents[:4]), pose_latents]).unsqueeze(0)
+            x_pose = self.original_patch_embedding(x_pose.to(self.original_patch_embedding.weight.dtype)).to(dtype)
+            x_pose = x_pose.flatten(2).transpose(1, 2)
+            if cache is not None and cache.slot is None:
+                cache.create(pose_latents, len(self.blocks) * x_pose.numel() * x_pose.element_size())
+
+            text_embed_dtype = self.text_embedding[0].weight.dtype
+            if text_embed_dtype not in [torch.float16, torch.bfloat16, torch.float32]:
+                text_embed_dtype = dtype
+            if self.offload_txt_emb:
+                self.text_embedding.to(device)
+            context_pose = torch.stack([torch.cat([u, u.new_zeros(self.text_len - u.size(0), u.size(1))]) for u in animate2_input["context"]])
+            context_pose = self.text_embedding(context_pose.to(device, text_embed_dtype))
+            if self.offload_txt_emb:
+                self.text_embedding.to(self.offload_device, non_blocking=self.use_non_blocking)
+
+            clip_fea_pose = animate2_input.get("clip_fea", None)
+            if clip_fea_pose is not None and hasattr(self, "img_emb"):
+                if self.offload_img_emb:
+                    self.img_emb.to(device)
+                clip_embed_pose = self.img_emb(clip_fea_pose.to(device))
+                if self.offload_img_emb:
+                    self.img_emb.to(self.offload_device, non_blocking=self.use_non_blocking)
+
+        # the pose branch is modulated at a fixed timestep of 1
+        time_embed_dtype = self.time_embedding[0].weight.dtype
+        if time_embed_dtype not in [torch.float16, torch.bfloat16, torch.float32]:
+            time_embed_dtype = dtype
+        e_pose = self.time_embedding(sinusoidal_embedding_1d(self.freq_dim, torch.ones(1, device=device)).to(time_embed_dtype))
+        e0_pose = self.time_projection(e_pose).unflatten(1, (6, self.dim)).to(dtype)
+
+        # pose frame j sits at generation frame j+1 in time, and in its own strip to the right of the generation tokens
+        img_ids = torch.zeros((pose_frames, h, w, 3), device=device, dtype=torch.float32)
+        img_ids[..., 0] += torch.arange(1, pose_frames + 1, device=device, dtype=torch.float32).reshape(-1, 1, 1)
+        img_ids[..., 1] += torch.arange(h, device=device, dtype=torch.float32).reshape(1, -1, 1)
+        img_ids[..., 2] += torch.arange(w, 2 * w, device=device, dtype=torch.float32).reshape(1, 1, -1)
+        freqs_pose = self.rope_embedder(img_ids.reshape(1, -1, 3), ntk_alphas).movedim(1, 2)
+
+        return {
+            "x": x_pose, "e0": e0_pose, "freqs": freqs_pose, "context": context_pose, "clip_embed": clip_embed_pose,
+            "cache": cache, "cached": cached, "frames": f, "hw": h * w,
+            "pose_strength": animate2_input.get("pose_strength", 1.0),
+            "ref_strength": animate2_input.get("reference_strength", 1.0),
+            "log_scale": animate2_input.get("log_scale", 0.0),
+            "skip_block_uncond": animate2_input.get("skip_block_uncond", -1),
+        }
+
+    def animate2_block(self, block, b, animate2, attention_mode=None, transformer_options={}):
+        """Advances the pose branch through block b, returns the K/V for the generation branch."""
+        cache = animate2["cache"]
+        if animate2["cached"]:
+            k, v = block.animate2_pose_kv(cache.take(b, self.main_device, self.base_dtype), animate2["e0"], animate2["freqs"])
+        else:
+            if cache is not None:
+                cache.put(b, animate2["x"])
+            animate2["x"], k, v = block.forward_animate2_pose(animate2["x"], animate2["e0"], animate2["freqs"], animate2["context"],
+                                                              clip_embed=animate2["clip_embed"], attention_mode_override=attention_mode,
+                                                              transformer_options=transformer_options)
+            if b == len(self.blocks) - 1:
+                animate2["x"] = None
+        if animate2["pose_strength"] != 1.0:
+            v = v * animate2["pose_strength"]
+        return {"k": k, "v": v, "frames": animate2["frames"], "hw": animate2["hw"],
+                "log_scale": animate2["log_scale"], "ref_strength": animate2["ref_strength"]}
+
 
     def forward(
         self, x, t, context, seq_len,
@@ -2347,6 +2465,7 @@ class WanModel(torch.nn.Module):
         one_to_all_input=None, one_to_all_controlnet_strength=0.0, # One-to-All
         scail_input=None,  # SCAIL pose
         dual_control_input=None,  # LongVie2 dual controlnet
+        animate2_input=None,  # Wan-Animate-2 pose branch
         transformer_options={},
         rope_negative_offset=0,
         num_memory_frames=0,
@@ -3109,6 +3228,12 @@ class WanModel(torch.nn.Module):
                     dwpose_emb = rearrange(unianim_data['dwpose'], 'b c f h w -> b (f h w) c').contiguous()
                     x.add_(dwpose_emb, alpha=unianim_data['strength'])
 
+            # Wan-Animate-2, outside of its step range the model runs as plain I2V with the reference slot
+            animate2 = None
+            if animate2_input is not None and animate2_input.get("pose_latents", None) is not None and \
+                animate2_input.get("start_percent", 0.0) <= current_step_percentage <= animate2_input.get("end_percent", 1.0):
+                animate2 = self.animate2_prepare(animate2_input, grid_sizes, ntk_alphas=ntk_alphas)
+
             # arguments
             kwargs = dict(
                 e=e0,
@@ -3258,6 +3383,14 @@ class WanModel(torch.nn.Module):
                     transfer_end = time.perf_counter()
                     transfer_time = transfer_end - transfer_start
                     compute_start = time.perf_counter()
+                # Wan-Animate-2 pose branch, it has to reach the next block even when this one is skipped
+                animate2_attn = None
+                if animate2 is not None:
+                    animate2_attn = self.animate2_block(block, b, animate2, attention_mode=attention_mode, transformer_options=transformer_options)
+                    if is_uncond and b == animate2["skip_block_uncond"]: # upstream's uncond pass skips a block
+                        if b >= swap_start_idx and self.blocks_to_swap > 0:
+                            block.to(self.offload_device, non_blocking=self.use_non_blocking)
+                        continue
                 #skip layer guidance
                 if self.slg_blocks is not None:
                     if b in self.slg_blocks and is_uncond:
@@ -3271,7 +3404,9 @@ class WanModel(torch.nn.Module):
                     x_onetoall_ref = onetoall_ref_block_samples[b // interval_ref]
 
                 # ---run block----#
-                x, x_ip, lynx_ref_feature, x_ovi = block(x, x_ip=x_ip, lynx_ref_feature=lynx_ref_feature, x_ovi=x_ovi, x_onetoall_ref=x_onetoall_ref, onetoall_freqs=onetoall_freqs, attention_mode_override=attention_mode, **kwargs)
+                x, x_ip, lynx_ref_feature, x_ovi = block(x, x_ip=x_ip, lynx_ref_feature=lynx_ref_feature, x_ovi=x_ovi, x_onetoall_ref=x_onetoall_ref, onetoall_freqs=onetoall_freqs,
+                                                         animate2_attn=animate2_attn, attention_mode_override=attention_mode, **kwargs)
+                del animate2_attn
                 # ---post block----#
 
                 # dual controlnet

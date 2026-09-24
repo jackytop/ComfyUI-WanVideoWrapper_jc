@@ -10,7 +10,7 @@ from .wanvideo.modules.model import WanModel, LoRALinearLayer, WanRMSNorm
 from .wanvideo.modules.t5 import T5EncoderModel
 from .wanvideo.modules.clip import CLIPModel
 from .wanvideo.wan_video_vae import WanVideoVAE, WanVideoVAE38
-from .custom_linear import _replace_linear
+from .custom_linear import _replace_linear, parse_int8_quant_config, CustomLinear, INT8_KITCHEN_AVAILABLE
 
 from accelerate import init_empty_weights
 from .utils import set_module_tensor_to_device, get_module_memory_mb_per_device
@@ -907,6 +907,11 @@ def load_weights(transformer, sd=None, weight_dtype=None, base_dtype=None,
                 dtype_to_use = torch.float32
             if "modulation" in name or "norm" in name:
                 dtype_to_use = value.dtype if value.dtype == torch.float32 else base_dtype
+            # INT8 weights stay as they are, and their scales in fp32
+            if value.dtype == torch.int8:
+                dtype_to_use = torch.int8
+            elif name.endswith("int8_scale"):
+                dtype_to_use = torch.float32
 
         load_device = transformer_load_device
         if block_swap_args is not None:
@@ -1082,8 +1087,8 @@ class WanVideoModelLoader:
                 "model": (folder_paths.get_filename_list("unet_gguf") + folder_paths.get_filename_list("diffusion_models"), {"tooltip": "These models are loaded from the 'ComfyUI/models/diffusion_models' -folder",}),
 
             "base_precision": (["fp32", "bf16", "fp16", "fp16_fast"], {"default": "bf16"}),
-            "quantization": (["disabled", "fp8_e4m3fn", "fp8_e4m3fn_fast", "fp8_e4m3fn_scaled", "fp8_e4m3fn_scaled_fast", "fp8_e5m2", "fp8_e5m2_fast", "fp8_e5m2_scaled", "fp8_e5m2_scaled_fast"], {"default": "disabled",
-                            "tooltip": "Optional quantization method, 'disabled' acts as autoselect based by weights. Scaled modes only work with matching weights, _fast modes (fp8 matmul) require CUDA compute capability >= 8.9 (NVIDIA 4000 series and up), e4m3fn generally can not be torch.compiled on compute capability < 8.9 (3000 series and under)"}),
+            "quantization": (["disabled", "fp8_e4m3fn", "fp8_e4m3fn_fast", "fp8_e4m3fn_scaled", "fp8_e4m3fn_scaled_fast", "fp8_e5m2", "fp8_e5m2_fast", "fp8_e5m2_scaled", "fp8_e5m2_scaled_fast", "int8_dequant"], {"default": "disabled",
+                            "tooltip": "Optional quantization method, 'disabled' acts as autoselect based by weights. Scaled modes only work with matching weights, _fast modes (fp8 matmul) require CUDA compute capability >= 8.9 (NVIDIA 4000 series and up), e4m3fn generally can not be torch.compiled on compute capability < 8.9 (3000 series and under).\n\nINT8 / INT8 ConvRot models (ComfyUI format) are detected automatically with 'disabled' and use INT8 matmul through comfy_kitchen when available. 'int8_dequant' dequantizes the INT8 weights to base_precision on the fly instead: slower, but skips the activation quantization"}),
             "load_device": (["main_device", "offload_device"], {"default": "offload_device", "tooltip": "Initial device to load the model to, NOT recommended with the larger models unless you have 48GB+ VRAM"}),
             },
             "optional": {
@@ -1251,6 +1256,25 @@ class WanVideoModelLoader:
             sd = {key.replace("model.diffusion_model.", "", 1): value for key, value in sd.items()}
         elif first_key.startswith("model."):
             sd = {key.replace("model.", "", 1): value for key, value in sd.items()}
+
+        # INT8 / INT8 ConvRot weights in ComfyUI's mixed precision format
+        int8_layers = None
+        if not gguf and any(k.endswith(".comfy_quant") for k in sd.keys()):
+            int8_layers = parse_int8_quant_config(sd) or None
+        if int8_layers is not None:
+            if quantization not in ["disabled", "int8_dequant"]:
+                raise ValueError(f"The model has INT8 weights, set quantization to 'disabled' (INT8 matmul) or 'int8_dequant' instead of '{quantization}'")
+            if lora is not None and merge_loras:
+                raise ValueError("LoRAs can't be merged into INT8 weights, disable merge_loras in the LoRA select node to apply them on the fly instead")
+            if vram_management_args is not None:
+                raise ValueError("INT8 models don't support vram_management_args, use block swap instead")
+            is_convrot = any(g > 0 for g in int8_layers.values())
+            int8_dequant = quantization == "int8_dequant" or not INT8_KITCHEN_AVAILABLE
+            quantization = "int8_convrot" if is_convrot else "int8"
+            log.info(f"{'INT8 ConvRot' if is_convrot else 'INT8'} weights detected in {len(int8_layers)} linear layers, "
+                     f"{'dequantizing to ' + base_precision + ' on the fly' if int8_dequant else 'using INT8 matmul (comfy_kitchen)'}")
+            if not INT8_KITCHEN_AVAILABLE:
+                log.warning("comfy_kitchen is not available (update ComfyUI for it), INT8 weights will be dequantized on the fly which is slower")
 
         if "patch_embedding.weight" in sd:
             dim = sd["patch_embedding.weight"].shape[0]
@@ -1753,9 +1777,13 @@ class WanVideoModelLoader:
                     patcher.patches.clear()
                 transformer.patched_linear = False
                 sd = None
-            elif "scaled" in quantization or lora is not None:
-                transformer = _replace_linear(transformer, base_dtype, sd, scale_weights=scale_weights, compile_args=compile_args)
+            elif "scaled" in quantization or lora is not None or int8_layers is not None:
+                transformer = _replace_linear(transformer, base_dtype, sd, scale_weights=scale_weights, compile_args=compile_args, int8_layers=int8_layers)
                 transformer.patched_linear = True
+                if int8_layers is not None and int8_dequant:
+                    for module in transformer.modules():
+                        if isinstance(module, CustomLinear) and module.is_int8:
+                            module.int8_matmul = False
 
         if "fast" in quantization:
             if lora is not None and not merge_loras:

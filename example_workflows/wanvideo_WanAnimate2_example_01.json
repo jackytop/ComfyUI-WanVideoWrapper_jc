@@ -1,0 +1,1055 @@
+{
+  "id": "5f1e6d2a-6c1b-4f5e-9a3a-2d7c41b0e8a2",
+  "revision": 0,
+  "last_node_id": 14,
+  "last_link_id": 16,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "CLIPVisionLoader",
+      "pos": [
+        -1400,
+        200
+      ],
+      "size": [
+        330,
+        58
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "CLIP_VISION",
+          "type": "CLIP_VISION",
+          "links": [
+            1
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "Node name for S&R": "CLIPVisionLoader"
+      },
+      "widgets_values": [
+        "clip_vision_h.safetensors"
+      ],
+      "color": "#2a363b",
+      "bgcolor": "#3f5159"
+    },
+    {
+      "id": 2,
+      "type": "LoadImage",
+      "pos": [
+        -1400,
+        -420
+      ],
+      "size": [
+        330,
+        360
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            2,
+            3
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": []
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "Node name for S&R": "LoadImage"
+      },
+      "widgets_values": [
+        "reference.png",
+        "image"
+      ],
+      "title": "Reference image"
+    },
+    {
+      "id": 3,
+      "type": "VHS_LoadVideo",
+      "pos": [
+        -1000,
+        -900
+      ],
+      "size": [
+        330,
+        520
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "meta_batch",
+          "type": "VHS_BatchManager",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "shape": 7,
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            4
+          ]
+        },
+        {
+          "name": "frame_count",
+          "type": "INT",
+          "links": [
+            5
+          ]
+        },
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "links": [
+            6
+          ]
+        },
+        {
+          "name": "video_info",
+          "type": "VHS_VIDEOINFO",
+          "links": []
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-videohelpersuite",
+        "Node name for S&R": "VHS_LoadVideo"
+      },
+      "widgets_values": {
+        "video": "driving.mp4",
+        "force_rate": 24,
+        "custom_width": 0,
+        "custom_height": 0,
+        "frame_load_cap": 0,
+        "skip_first_frames": 0,
+        "select_every_nth": 1,
+        "format": "AnimateDiff",
+        "choose video to upload": "image",
+        "videopreview": {
+          "hidden": false,
+          "paused": false,
+          "params": {
+            "filename": "driving.mp4",
+            "type": "input",
+            "format": "video/mp4",
+            "force_rate": 24,
+            "custom_width": 0,
+            "custom_height": 0,
+            "frame_load_cap": 0,
+            "skip_first_frames": 0,
+            "select_every_nth": 1
+          }
+        }
+      },
+      "title": "Driving (pose) video"
+    },
+    {
+      "id": 4,
+      "type": "WanVideoClipVisionEncode",
+      "pos": [
+        -1000,
+        100
+      ],
+      "size": [
+        330,
+        262
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "clip_vision",
+          "type": "CLIP_VISION",
+          "link": 1
+        },
+        {
+          "name": "image_1",
+          "type": "IMAGE",
+          "link": 2
+        },
+        {
+          "name": "image_2",
+          "type": "IMAGE",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "negative_image",
+          "type": "IMAGE",
+          "shape": 7,
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image_embeds",
+          "type": "WANVIDIMAGE_CLIPEMBEDS",
+          "links": [
+            7
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "ComfyUI-WanVideoWrapper",
+        "Node name for S&R": "WanVideoClipVisionEncode"
+      },
+      "widgets_values": [
+        1,
+        1,
+        "center",
+        "average",
+        true,
+        0,
+        0.5
+      ],
+      "color": "#233",
+      "bgcolor": "#355"
+    },
+    {
+      "id": 5,
+      "type": "WanVideoVAELoader",
+      "pos": [
+        -1400,
+        330
+      ],
+      "size": [
+        380,
+        106
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "compile_args",
+          "type": "WANCOMPILEARGS",
+          "shape": 7,
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "vae",
+          "type": "WANVAE",
+          "links": [
+            8,
+            9
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "ComfyUI-WanVideoWrapper",
+        "Node name for S&R": "WanVideoVAELoader"
+      },
+      "widgets_values": [
+        "wanvideo\\Wan2_1_VAE_bf16.safetensors",
+        "bf16",
+        false,
+        false
+      ],
+      "color": "#322",
+      "bgcolor": "#533"
+    },
+    {
+      "id": 6,
+      "type": "WanVideoTextEncodeCached",
+      "pos": [
+        -1000,
+        420
+      ],
+      "size": [
+        480,
+        360
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "extender_args",
+          "type": "WANVIDEOPROMPTEXTENDER_ARGS",
+          "shape": 7,
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "text_embeds",
+          "type": "WANVIDEOTEXTEMBEDS",
+          "links": [
+            14
+          ]
+        },
+        {
+          "name": "negative_text_embeds",
+          "type": "WANVIDEOTEXTEMBEDS",
+          "links": []
+        },
+        {
+          "name": "positive_prompt",
+          "type": "STRING",
+          "links": []
+        }
+      ],
+      "properties": {
+        "cnr_id": "ComfyUI-WanVideoWrapper",
+        "Node name for S&R": "WanVideoTextEncodeCached"
+      },
+      "widgets_values": [
+        "umt5-xxl-enc-bf16.safetensors",
+        "bf16",
+        "人物外观描述：穿着一件浅蓝色的校服衬衫，领口和袖口有白色边饰。背景描述：背景为明亮、整洁的教室，氛围安静有序。",
+        "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+        "disabled",
+        true,
+        "gpu"
+      ],
+      "color": "#432",
+      "bgcolor": "#653",
+      "title": "Prompt: character + background description"
+    },
+    {
+      "id": 7,
+      "type": "WanVideoTextEncodeCached",
+      "pos": [
+        -1000,
+        830
+      ],
+      "size": [
+        480,
+        300
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "extender_args",
+          "type": "WANVIDEOPROMPTEXTENDER_ARGS",
+          "shape": 7,
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "text_embeds",
+          "type": "WANVIDEOTEXTEMBEDS",
+          "links": [
+            10
+          ]
+        },
+        {
+          "name": "negative_text_embeds",
+          "type": "WANVIDEOTEXTEMBEDS",
+          "links": []
+        },
+        {
+          "name": "positive_prompt",
+          "type": "STRING",
+          "links": []
+        }
+      ],
+      "properties": {
+        "cnr_id": "ComfyUI-WanVideoWrapper",
+        "Node name for S&R": "WanVideoTextEncodeCached"
+      },
+      "widgets_values": [
+        "umt5-xxl-enc-bf16.safetensors",
+        "bf16",
+        "人物动作的参考视频",
+        "",
+        "disabled",
+        true,
+        "gpu"
+      ],
+      "color": "#432",
+      "bgcolor": "#653",
+      "title": "Pose branch prompt (upstream default)"
+    },
+    {
+      "id": 8,
+      "type": "WanVideoBlockSwap",
+      "pos": [
+        -1400,
+        -1000
+      ],
+      "size": [
+        320,
+        202
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "block_swap_args",
+          "type": "BLOCKSWAPARGS",
+          "links": [
+            11
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "ComfyUI-WanVideoWrapper",
+        "Node name for S&R": "WanVideoBlockSwap"
+      },
+      "widgets_values": [
+        20,
+        false,
+        false,
+        true,
+        0,
+        1,
+        false
+      ],
+      "color": "#223",
+      "bgcolor": "#335"
+    },
+    {
+      "id": 9,
+      "type": "WanVideoModelLoader",
+      "pos": [
+        -1000,
+        -1250
+      ],
+      "size": [
+        600,
+        294
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "compile_args",
+          "type": "WANCOMPILEARGS",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "block_swap_args",
+          "type": "BLOCKSWAPARGS",
+          "shape": 7,
+          "link": 11
+        },
+        {
+          "name": "lora",
+          "type": "WANVIDLORA",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "vram_management_args",
+          "type": "VRAM_MANAGEMENTARGS",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "extra_model",
+          "type": "VACEPATH",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "fantasytalking_model",
+          "type": "FANTASYTALKINGMODEL",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "multitalk_model",
+          "type": "MULTITALKMODEL",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "fantasyportrait_model",
+          "type": "FANTASYPORTRAITMODEL",
+          "shape": 7,
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "model",
+          "type": "WANVIDEOMODEL",
+          "links": [
+            12
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "ComfyUI-WanVideoWrapper",
+        "Node name for S&R": "WanVideoModelLoader"
+      },
+      "widgets_values": [
+        "WanVideo\\Wan2_2-Animate-2-14B_int8_convrot.safetensors",
+        "bf16",
+        "disabled",
+        "offload_device",
+        "sageattn",
+        "default"
+      ],
+      "color": "#223",
+      "bgcolor": "#335"
+    },
+    {
+      "id": 10,
+      "type": "WanVideoAnimate2Embeds",
+      "pos": [
+        -350,
+        -400
+      ],
+      "size": [
+        380,
+        620
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "vae",
+          "type": "WANVAE",
+          "link": 8
+        },
+        {
+          "name": "ref_image",
+          "type": "IMAGE",
+          "shape": 7,
+          "link": 3
+        },
+        {
+          "name": "pose_images",
+          "type": "IMAGE",
+          "shape": 7,
+          "link": 4
+        },
+        {
+          "name": "clip_embeds",
+          "type": "WANVIDIMAGE_CLIPEMBEDS",
+          "shape": 7,
+          "link": 7
+        },
+        {
+          "name": "pose_clip_embeds",
+          "type": "WANVIDIMAGE_CLIPEMBEDS",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "pose_text_embeds",
+          "type": "WANVIDEOTEXTEMBEDS",
+          "shape": 7,
+          "link": 10
+        },
+        {
+          "name": "continue_motion",
+          "type": "IMAGE",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "num_frames",
+          "type": "INT",
+          "widget": {
+            "name": "num_frames"
+          },
+          "link": 5
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image_embeds",
+          "type": "WANVIDIMAGE_EMBEDS",
+          "links": [
+            13
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "ComfyUI-WanVideoWrapper",
+        "Node name for S&R": "WanVideoAnimate2Embeds"
+      },
+      "widgets_values": [
+        832,
+        480,
+        81,
+        81,
+        true,
+        1.0,
+        1.0,
+        0.0,
+        9,
+        0.0,
+        1.0,
+        "cpu",
+        "default",
+        "crop",
+        false
+      ]
+    },
+    {
+      "id": 11,
+      "type": "WanVideoSampler",
+      "pos": [
+        150,
+        -500
+      ],
+      "size": [
+        330,
+        880
+      ],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "WANVIDEOMODEL",
+          "link": 12
+        },
+        {
+          "name": "image_embeds",
+          "type": "WANVIDIMAGE_EMBEDS",
+          "link": 13
+        },
+        {
+          "name": "text_embeds",
+          "type": "WANVIDEOTEXTEMBEDS",
+          "shape": 7,
+          "link": 14
+        },
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "feta_args",
+          "type": "FETAARGS",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "context_options",
+          "type": "WANVIDCONTEXT",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "cache_args",
+          "type": "CACHEARGS",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "flowedit_args",
+          "type": "FLOWEDITARGS",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "slg_args",
+          "type": "SLGARGS",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "loop_args",
+          "type": "LOOPARGS",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "experimental_args",
+          "type": "EXPERIMENTALARGS",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "sigmas",
+          "type": "SIGMAS",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "unianimate_poses",
+          "type": "UNIANIMATE_POSE",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "fantasytalking_embeds",
+          "type": "FANTASYTALKING_EMBEDS",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "uni3c_embeds",
+          "type": "UNI3C_EMBEDS",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "multitalk_embeds",
+          "type": "MULTITALK_EMBEDS",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "freeinit_args",
+          "type": "FREEINITARGS",
+          "shape": 7,
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "links": [
+            15
+          ]
+        },
+        {
+          "name": "denoised_samples",
+          "type": "LATENT",
+          "links": []
+        }
+      ],
+      "properties": {
+        "cnr_id": "ComfyUI-WanVideoWrapper",
+        "Node name for S&R": "WanVideoSampler"
+      },
+      "widgets_values": [
+        40,
+        3.0,
+        5.0,
+        42,
+        "fixed",
+        true,
+        "unipc",
+        0,
+        1.0,
+        false,
+        "comfy",
+        0,
+        -1,
+        false
+      ]
+    },
+    {
+      "id": 12,
+      "type": "WanVideoDecode",
+      "pos": [
+        550,
+        -500
+      ],
+      "size": [
+        300,
+        198
+      ],
+      "flags": {},
+      "order": 12,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "vae",
+          "type": "WANVAE",
+          "link": 9
+        },
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "link": 15
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "links": [
+            16
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "ComfyUI-WanVideoWrapper",
+        "Node name for S&R": "WanVideoDecode"
+      },
+      "widgets_values": [
+        false,
+        272,
+        272,
+        144,
+        128,
+        "default"
+      ],
+      "color": "#322",
+      "bgcolor": "#533"
+    },
+    {
+      "id": 13,
+      "type": "VHS_VideoCombine",
+      "pos": [
+        900,
+        -500
+      ],
+      "size": [
+        600,
+        700
+      ],
+      "flags": {},
+      "order": 13,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 16
+        },
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "shape": 7,
+          "link": 6
+        },
+        {
+          "name": "meta_batch",
+          "type": "VHS_BatchManager",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "shape": 7,
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "Filenames",
+          "type": "VHS_FILENAMES",
+          "links": []
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-videohelpersuite",
+        "Node name for S&R": "VHS_VideoCombine"
+      },
+      "widgets_values": {
+        "frame_rate": 24,
+        "loop_count": 0,
+        "filename_prefix": "WanAnimate2",
+        "format": "video/h264-mp4",
+        "pix_fmt": "yuv420p",
+        "crf": 19,
+        "save_metadata": true,
+        "trim_to_audio": false,
+        "pingpong": false,
+        "save_output": true,
+        "videopreview": {
+          "hidden": false,
+          "paused": false,
+          "params": {}
+        }
+      }
+    },
+    {
+      "id": 14,
+      "type": "MarkdownNote",
+      "pos": [
+        -350,
+        -1330
+      ],
+      "size": [
+        640,
+        740
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {
+        "cnr_id": "ComfyUI-WanVideoWrapper",
+        "Node name for S&R": "MarkdownNote"
+      },
+      "widgets_values": [
+        "## Wan-Animate-2\nhttps://github.com/Wan-Video/Wan-Animate-2 — the driving video is used as is, no pose or face extraction needed.\n\n**Models** (`models/diffusion_models`): Wan-Animate-2 14B base or distilled, bf16 / fp8 / **INT8 ConvRot** (ComfyUI format, auto detected with quantization `disabled`, uses INT8 matmul through comfy_kitchen; `int8_dequant` dequantizes on the fly instead). Weights: https://huggingface.co/Wan-AI/Wan2.2-Animate-2-14B\nText encoder `umt5-xxl-enc`, CLIP vision `clip_vision_h`, VAE `Wan2_1_VAE`.\n\n**Settings**\n- Base model: 40 steps, cfg 3.0, shift 5, `log_scale` 0.0\n- Distilled model: 10 steps, cfg 1.0, scheduler `euler`, `log_scale` -1.3\n- Prompt: describe the character's appearance and the background, not the motion (upstream uses a Chinese template: 人物外观描述：... 背景描述：...)\n- Pose branch prompt: upstream default is 人物动作的参考视频, leave `pose_text_embeds` unconnected to reuse the main prompt\n- `uncond_skip_block` 9 matches upstream's CFG pass\n\n**Long videos**: when `num_frames` is larger than `frame_window_size` (81), the video is generated window after window, each continuing from the last frame of the previous one, like upstream. Context options also work.\n\n**Memory**: `pose_cache` keeps the pose branch activations (it never changes during sampling) and roughly halves the time, ~12 GB RAM at 832x480x81 in bf16, `int8` halves that."
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    }
+  ],
+  "links": [
+    [
+      1,
+      1,
+      0,
+      4,
+      0,
+      "CLIP_VISION"
+    ],
+    [
+      2,
+      2,
+      0,
+      4,
+      1,
+      "IMAGE"
+    ],
+    [
+      3,
+      2,
+      0,
+      10,
+      1,
+      "IMAGE"
+    ],
+    [
+      4,
+      3,
+      0,
+      10,
+      2,
+      "IMAGE"
+    ],
+    [
+      5,
+      3,
+      1,
+      10,
+      7,
+      "INT"
+    ],
+    [
+      6,
+      3,
+      2,
+      13,
+      1,
+      "AUDIO"
+    ],
+    [
+      7,
+      4,
+      0,
+      10,
+      3,
+      "WANVIDIMAGE_CLIPEMBEDS"
+    ],
+    [
+      8,
+      5,
+      0,
+      10,
+      0,
+      "WANVAE"
+    ],
+    [
+      9,
+      5,
+      0,
+      12,
+      0,
+      "WANVAE"
+    ],
+    [
+      10,
+      7,
+      0,
+      10,
+      5,
+      "WANVIDEOTEXTEMBEDS"
+    ],
+    [
+      11,
+      8,
+      0,
+      9,
+      1,
+      "BLOCKSWAPARGS"
+    ],
+    [
+      12,
+      9,
+      0,
+      11,
+      0,
+      "WANVIDEOMODEL"
+    ],
+    [
+      13,
+      10,
+      0,
+      11,
+      1,
+      "WANVIDIMAGE_EMBEDS"
+    ],
+    [
+      14,
+      6,
+      0,
+      11,
+      2,
+      "WANVIDEOTEXTEMBEDS"
+    ],
+    [
+      15,
+      11,
+      0,
+      12,
+      1,
+      "LATENT"
+    ],
+    [
+      16,
+      12,
+      0,
+      13,
+      0,
+      "IMAGE"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.6,
+      "offset": [
+        1500,
+        1350
+      ]
+    }
+  },
+  "version": 0.4
+}
