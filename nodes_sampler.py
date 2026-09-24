@@ -2068,6 +2068,10 @@ class WanVideoSampler:
                             if animate2_pose_latents is not None:
                                 pose_indices = torch.tensor([i - 1 for i in c_window[1:]]).clamp(0, animate2_pose_latents.shape[1] - 1)
                                 partial_animate2_pose_latents = animate2_pose_latents[:, pose_indices]
+                            if animate2_data is not None:
+                                # windows with and without the prepended reference slot differ by a frame, padding would
+                                # leave the sequence longer than its RoPE freqs, which the fused rope kernels reject
+                                seq_len = math.ceil((noise.shape[2] * noise.shape[3]) / 4 * len(c_window))
 
                             if len(timestep.shape) != 1:
                                 partial_timestep = timestep[:, c]
