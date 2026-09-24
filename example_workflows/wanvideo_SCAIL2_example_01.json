@@ -1,0 +1,1293 @@
+{
+  "id": "8c3b1f0e-2a4d-4e6b-9f1a-7d5e3c2b1a90",
+  "revision": 0,
+  "last_node_id": 18,
+  "last_link_id": 21,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "CLIPVisionLoader",
+      "pos": [
+        -1800,
+        250
+      ],
+      "size": [
+        330,
+        58
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "CLIP_VISION",
+          "type": "CLIP_VISION",
+          "links": [
+            1
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "Node name for S&R": "CLIPVisionLoader"
+      },
+      "widgets_values": [
+        "clip_vision_h.safetensors"
+      ],
+      "color": "#2a363b",
+      "bgcolor": "#3f5159"
+    },
+    {
+      "id": 2,
+      "type": "LoadImage",
+      "pos": [
+        -1800,
+        -420
+      ],
+      "size": [
+        330,
+        360
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            2,
+            3
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": []
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "Node name for S&R": "LoadImage"
+      },
+      "widgets_values": [
+        "reference.png",
+        "image"
+      ],
+      "title": "Reference image"
+    },
+    {
+      "id": 3,
+      "type": "LoadImage",
+      "pos": [
+        -1800,
+        -1020
+      ],
+      "size": [
+        330,
+        360
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            4
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": []
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "Node name for S&R": "LoadImage"
+      },
+      "widgets_values": [
+        "reference_mask.png",
+        "image"
+      ],
+      "title": "Reference character mask (white on black)"
+    },
+    {
+      "id": 4,
+      "type": "VHS_LoadVideo",
+      "pos": [
+        -1400,
+        -1500
+      ],
+      "size": [
+        330,
+        520
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "meta_batch",
+          "type": "VHS_BatchManager",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "shape": 7,
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            5
+          ]
+        },
+        {
+          "name": "frame_count",
+          "type": "INT",
+          "links": [
+            6
+          ]
+        },
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "links": [
+            7
+          ]
+        },
+        {
+          "name": "video_info",
+          "type": "VHS_VIDEOINFO",
+          "links": []
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-videohelpersuite",
+        "Node name for S&R": "VHS_LoadVideo"
+      },
+      "widgets_values": {
+        "video": "driving.mp4",
+        "force_rate": 16,
+        "custom_width": 0,
+        "custom_height": 0,
+        "frame_load_cap": 0,
+        "skip_first_frames": 0,
+        "select_every_nth": 1,
+        "format": "AnimateDiff",
+        "choose video to upload": "image",
+        "videopreview": {
+          "hidden": false,
+          "paused": false,
+          "params": {
+            "filename": "driving.mp4",
+            "type": "input",
+            "format": "video/mp4",
+            "force_rate": 16,
+            "custom_width": 0,
+            "custom_height": 0,
+            "frame_load_cap": 0,
+            "skip_first_frames": 0,
+            "select_every_nth": 1
+          }
+        }
+      },
+      "title": "Driving video"
+    },
+    {
+      "id": 5,
+      "type": "VHS_LoadVideo",
+      "pos": [
+        -1400,
+        -900
+      ],
+      "size": [
+        330,
+        520
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "meta_batch",
+          "type": "VHS_BatchManager",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "shape": 7,
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            8
+          ]
+        },
+        {
+          "name": "frame_count",
+          "type": "INT",
+          "links": []
+        },
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "links": []
+        },
+        {
+          "name": "video_info",
+          "type": "VHS_VIDEOINFO",
+          "links": []
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-videohelpersuite",
+        "Node name for S&R": "VHS_LoadVideo"
+      },
+      "widgets_values": {
+        "video": "driving_mask.mp4",
+        "force_rate": 16,
+        "custom_width": 0,
+        "custom_height": 0,
+        "frame_load_cap": 0,
+        "skip_first_frames": 0,
+        "select_every_nth": 1,
+        "format": "AnimateDiff",
+        "choose video to upload": "image",
+        "videopreview": {
+          "hidden": false,
+          "paused": false,
+          "params": {
+            "filename": "driving_mask.mp4",
+            "type": "input",
+            "format": "video/mp4",
+            "force_rate": 16,
+            "custom_width": 0,
+            "custom_height": 0,
+            "frame_load_cap": 0,
+            "skip_first_frames": 0,
+            "select_every_nth": 1
+          }
+        }
+      },
+      "title": "Driving character mask video (white on black, e.g. from SAM)"
+    },
+    {
+      "id": 6,
+      "type": "ImageToMask",
+      "pos": [
+        -1000,
+        -1020
+      ],
+      "size": [
+        270,
+        58
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 4
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": [
+            9
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "Node name for S&R": "ImageToMask"
+      },
+      "widgets_values": [
+        "red"
+      ]
+    },
+    {
+      "id": 7,
+      "type": "ImageToMask",
+      "pos": [
+        -1000,
+        -900
+      ],
+      "size": [
+        270,
+        58
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 8
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": [
+            10
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "Node name for S&R": "ImageToMask"
+      },
+      "widgets_values": [
+        "red"
+      ]
+    },
+    {
+      "id": 8,
+      "type": "WanVideoSCAIL2ColoredMask_jc",
+      "pos": [
+        -650,
+        -1000
+      ],
+      "size": [
+        340,
+        170
+      ],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "pose_video_mask",
+          "type": "MASK",
+          "shape": 7,
+          "link": 10
+        },
+        {
+          "name": "ref_mask",
+          "type": "MASK",
+          "shape": 7,
+          "link": 9
+        },
+        {
+          "name": "prev_pose_video_mask",
+          "type": "IMAGE",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "prev_ref_mask",
+          "type": "IMAGE",
+          "shape": 7,
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "pose_video_mask",
+          "type": "IMAGE",
+          "links": [
+            11
+          ]
+        },
+        {
+          "name": "ref_mask",
+          "type": "IMAGE",
+          "links": [
+            12
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "jackytop/ComfyUI-WanVideoWrapper_jc",
+        "Node name for S&R": "WanVideoSCAIL2ColoredMask_jc"
+      },
+      "widgets_values": [
+        false,
+        0
+      ],
+      "color": "#233",
+      "bgcolor": "#355"
+    },
+    {
+      "id": 9,
+      "type": "WanVideoClipVisionEncode_jc",
+      "pos": [
+        -1400,
+        100
+      ],
+      "size": [
+        330,
+        262
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "clip_vision",
+          "type": "CLIP_VISION",
+          "link": 1
+        },
+        {
+          "name": "image_1",
+          "type": "IMAGE",
+          "link": 2
+        },
+        {
+          "name": "image_2",
+          "type": "IMAGE",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "negative_image",
+          "type": "IMAGE",
+          "shape": 7,
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image_embeds",
+          "type": "WANVIDIMAGE_CLIPEMBEDS",
+          "links": [
+            13
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "jackytop/ComfyUI-WanVideoWrapper_jc",
+        "Node name for S&R": "WanVideoClipVisionEncode_jc"
+      },
+      "widgets_values": [
+        1,
+        1,
+        "center",
+        "average",
+        true,
+        0,
+        0.5
+      ],
+      "color": "#233",
+      "bgcolor": "#355"
+    },
+    {
+      "id": 10,
+      "type": "WanVideoVAELoader_jc",
+      "pos": [
+        -1800,
+        380
+      ],
+      "size": [
+        380,
+        106
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "compile_args",
+          "type": "WANCOMPILEARGS",
+          "shape": 7,
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "vae",
+          "type": "WANVAE",
+          "links": [
+            14,
+            15
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "jackytop/ComfyUI-WanVideoWrapper_jc",
+        "Node name for S&R": "WanVideoVAELoader_jc"
+      },
+      "widgets_values": [
+        "wanvideo\\Wan2_1_VAE_bf16.safetensors",
+        "bf16",
+        false,
+        false
+      ],
+      "color": "#322",
+      "bgcolor": "#533"
+    },
+    {
+      "id": 11,
+      "type": "WanVideoTextEncodeCached_jc",
+      "pos": [
+        -1400,
+        420
+      ],
+      "size": [
+        480,
+        360
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "extender_args",
+          "type": "WANVIDEOPROMPTEXTENDER_ARGS",
+          "shape": 7,
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "text_embeds",
+          "type": "WANVIDEOTEXTEMBEDS",
+          "links": [
+            19
+          ]
+        },
+        {
+          "name": "negative_text_embeds",
+          "type": "WANVIDEOTEXTEMBEDS",
+          "links": []
+        },
+        {
+          "name": "positive_prompt",
+          "type": "STRING",
+          "links": []
+        }
+      ],
+      "properties": {
+        "aux_id": "jackytop/ComfyUI-WanVideoWrapper_jc",
+        "Node name for S&R": "WanVideoTextEncodeCached_jc"
+      },
+      "widgets_values": [
+        "umt5-xxl-enc-bf16.safetensors",
+        "bf16",
+        "A young woman with long black hair, wearing a white t-shirt, blue jeans and white sneakers, is dancing energetically in a bright dance studio with wooden floors and a large mirror.",
+        "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+        "disabled",
+        true,
+        "gpu"
+      ],
+      "color": "#432",
+      "bgcolor": "#653",
+      "title": "Prompt: describe the generated video in detail"
+    },
+    {
+      "id": 12,
+      "type": "WanVideoBlockSwap_jc",
+      "pos": [
+        -1000,
+        -1750
+      ],
+      "size": [
+        320,
+        202
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "block_swap_args",
+          "type": "BLOCKSWAPARGS",
+          "links": [
+            16
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "jackytop/ComfyUI-WanVideoWrapper_jc",
+        "Node name for S&R": "WanVideoBlockSwap_jc"
+      },
+      "widgets_values": [
+        20,
+        false,
+        false,
+        true,
+        0,
+        1,
+        false
+      ],
+      "color": "#223",
+      "bgcolor": "#335"
+    },
+    {
+      "id": 13,
+      "type": "WanVideoModelLoader_jc",
+      "pos": [
+        -650,
+        -1800
+      ],
+      "size": [
+        600,
+        294
+      ],
+      "flags": {},
+      "order": 12,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "compile_args",
+          "type": "WANCOMPILEARGS",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "block_swap_args",
+          "type": "BLOCKSWAPARGS",
+          "shape": 7,
+          "link": 16
+        },
+        {
+          "name": "lora",
+          "type": "WANVIDLORA",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "vram_management_args",
+          "type": "VRAM_MANAGEMENTARGS",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "extra_model",
+          "type": "VACEPATH",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "fantasytalking_model",
+          "type": "FANTASYTALKINGMODEL",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "multitalk_model",
+          "type": "MULTITALKMODEL",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "fantasyportrait_model",
+          "type": "FANTASYPORTRAITMODEL",
+          "shape": 7,
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "model",
+          "type": "WANVIDEOMODEL",
+          "links": [
+            17
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "jackytop/ComfyUI-WanVideoWrapper_jc",
+        "Node name for S&R": "WanVideoModelLoader_jc"
+      },
+      "widgets_values": [
+        "WanVideo\\SCAIL2_14B_bf16.safetensors",
+        "bf16",
+        "disabled",
+        "offload_device",
+        "sageattn",
+        "default"
+      ],
+      "color": "#223",
+      "bgcolor": "#335"
+    },
+    {
+      "id": 14,
+      "type": "WanVideoSCAIL2Embeds_jc",
+      "pos": [
+        -650,
+        -400
+      ],
+      "size": [
+        380,
+        560
+      ],
+      "flags": {},
+      "order": 13,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "vae",
+          "type": "WANVAE",
+          "link": 14
+        },
+        {
+          "name": "ref_image",
+          "type": "IMAGE",
+          "shape": 7,
+          "link": 3
+        },
+        {
+          "name": "ref_mask",
+          "type": "IMAGE",
+          "shape": 7,
+          "link": 12
+        },
+        {
+          "name": "pose_video",
+          "type": "IMAGE",
+          "shape": 7,
+          "link": 5
+        },
+        {
+          "name": "pose_video_mask",
+          "type": "IMAGE",
+          "shape": 7,
+          "link": 11
+        },
+        {
+          "name": "clip_embeds",
+          "type": "WANVIDIMAGE_CLIPEMBEDS",
+          "shape": 7,
+          "link": 13
+        },
+        {
+          "name": "num_frames",
+          "type": "INT",
+          "widget": {
+            "name": "num_frames"
+          },
+          "link": 6
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image_embeds",
+          "type": "WANVIDIMAGE_EMBEDS",
+          "links": [
+            18
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "jackytop/ComfyUI-WanVideoWrapper_jc",
+        "Node name for S&R": "WanVideoSCAIL2Embeds_jc"
+      },
+      "widgets_values": [
+        512,
+        896,
+        81,
+        false,
+        81,
+        5,
+        1.0,
+        0.0,
+        1.0,
+        true,
+        false
+      ]
+    },
+    {
+      "id": 15,
+      "type": "WanVideoSampler_jc",
+      "pos": [
+        -150,
+        -500
+      ],
+      "size": [
+        330,
+        880
+      ],
+      "flags": {},
+      "order": 14,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "WANVIDEOMODEL",
+          "link": 17
+        },
+        {
+          "name": "image_embeds",
+          "type": "WANVIDIMAGE_EMBEDS",
+          "link": 18
+        },
+        {
+          "name": "text_embeds",
+          "type": "WANVIDEOTEXTEMBEDS",
+          "shape": 7,
+          "link": 19
+        },
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "feta_args",
+          "type": "FETAARGS",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "context_options",
+          "type": "WANVIDCONTEXT",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "cache_args",
+          "type": "CACHEARGS",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "flowedit_args",
+          "type": "FLOWEDITARGS",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "slg_args",
+          "type": "SLGARGS",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "loop_args",
+          "type": "LOOPARGS",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "experimental_args",
+          "type": "EXPERIMENTALARGS",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "sigmas",
+          "type": "SIGMAS",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "unianimate_poses",
+          "type": "UNIANIMATE_POSE",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "fantasytalking_embeds",
+          "type": "FANTASYTALKING_EMBEDS",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "uni3c_embeds",
+          "type": "UNI3C_EMBEDS",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "multitalk_embeds",
+          "type": "MULTITALK_EMBEDS",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "freeinit_args",
+          "type": "FREEINITARGS",
+          "shape": 7,
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "links": [
+            20
+          ]
+        },
+        {
+          "name": "denoised_samples",
+          "type": "LATENT",
+          "links": []
+        }
+      ],
+      "properties": {
+        "aux_id": "jackytop/ComfyUI-WanVideoWrapper_jc",
+        "Node name for S&R": "WanVideoSampler_jc"
+      },
+      "widgets_values": [
+        40,
+        5.0,
+        3.0,
+        42,
+        "fixed",
+        true,
+        "unipc",
+        0,
+        1.0,
+        false,
+        "comfy",
+        0,
+        -1,
+        false
+      ]
+    },
+    {
+      "id": 16,
+      "type": "WanVideoDecode_jc",
+      "pos": [
+        250,
+        -500
+      ],
+      "size": [
+        300,
+        198
+      ],
+      "flags": {},
+      "order": 16,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "vae",
+          "type": "WANVAE",
+          "link": 15
+        },
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "link": 20
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "links": [
+            21
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "jackytop/ComfyUI-WanVideoWrapper_jc",
+        "Node name for S&R": "WanVideoDecode_jc"
+      },
+      "widgets_values": [
+        false,
+        272,
+        272,
+        144,
+        128,
+        "default"
+      ],
+      "color": "#322",
+      "bgcolor": "#533"
+    },
+    {
+      "id": 17,
+      "type": "VHS_VideoCombine",
+      "pos": [
+        600,
+        -500
+      ],
+      "size": [
+        600,
+        700
+      ],
+      "flags": {},
+      "order": 17,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 21
+        },
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "shape": 7,
+          "link": 7
+        },
+        {
+          "name": "meta_batch",
+          "type": "VHS_BatchManager",
+          "shape": 7,
+          "link": null
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "shape": 7,
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "Filenames",
+          "type": "VHS_FILENAMES",
+          "links": []
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-videohelpersuite",
+        "Node name for S&R": "VHS_VideoCombine"
+      },
+      "widgets_values": {
+        "frame_rate": 16,
+        "loop_count": 0,
+        "filename_prefix": "SCAIL2",
+        "format": "video/h264-mp4",
+        "pix_fmt": "yuv420p",
+        "crf": 19,
+        "save_metadata": true,
+        "trim_to_audio": false,
+        "pingpong": false,
+        "save_output": true,
+        "videopreview": {
+          "hidden": false,
+          "paused": false,
+          "params": {}
+        }
+      }
+    },
+    {
+      "id": 18,
+      "type": "MarkdownNote",
+      "pos": [
+        0,
+        -1800
+      ],
+      "size": [
+        700,
+        1000
+      ],
+      "flags": {},
+      "order": 15,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {
+        "aux_id": "jackytop/ComfyUI-WanVideoWrapper_jc",
+        "Node name for S&R": "MarkdownNote"
+      },
+      "widgets_values": [
+        "## SCAIL-2\nhttps://github.com/zai-org/SCAIL-2 — character animation and replacement. The driving video can be the source video itself (end-to-end) or a rendered pose video.\n\n**Models** (`models/diffusion_models`): a single file SCAIL-2 14B checkpoint in Wan key format (the one ComfyUI core loads, or the upstream weights converted with its `convert.py`), bf16 / fp8 / INT8 ConvRot. The loader detects it from `patch_embedding_mask`. Text encoder `umt5-xxl-enc`, CLIP vision `clip_vision_h`, VAE `Wan2_1_VAE`. `rope_function` is switched to `comfy` automatically.\n\n**Settings**\n- 40 steps, cfg 5.0, shift 3, `unipc` (upstream defaults)\n- With the Lightx2v I2V distill LoRA: 8 steps, cfg 1.0, shift 1\n- Width and height divisible by 32; trained at 512p and 704p (e.g. 512x896, 704x1280)\n- Prompt: a long, detailed description of the generated video (character appearance, clothing, background, objects the character interacts with). For replacement, describe the video after the replacement.\n\n**Masks** (they matter): each character gets an identity color, the same one in the reference and the driving mask (blue, red, green, magenta, cyan, yellow). `WanVideo SCAIL2 Colored Mask` turns plain masks (e.g. from SAM2/SAM3) into them; chain one per character through the `prev_*` inputs.\n- Animation Mode: reference mask on white, driving mask on black\n- Replacement Mode (`replacement_mode` on both nodes): reference mask on black, driving mask on white\n\n**References**: extra images in the `ref_image` batch are used as additional references (another view, a close-up, a clean background), each with its mask in the `ref_mask` batch.\n\n**Long videos**: when `num_frames` is larger than `segment_len` (81), the video is generated segment after segment, each starting from the last `segment_overlap` (5) frames of the previous one as clean history, like upstream. Context options also work instead."
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    }
+  ],
+  "links": [
+    [
+      1,
+      1,
+      0,
+      9,
+      0,
+      "CLIP_VISION"
+    ],
+    [
+      2,
+      2,
+      0,
+      9,
+      1,
+      "IMAGE"
+    ],
+    [
+      3,
+      2,
+      0,
+      14,
+      1,
+      "IMAGE"
+    ],
+    [
+      4,
+      3,
+      0,
+      6,
+      0,
+      "IMAGE"
+    ],
+    [
+      5,
+      4,
+      0,
+      14,
+      3,
+      "IMAGE"
+    ],
+    [
+      6,
+      4,
+      1,
+      14,
+      6,
+      "INT"
+    ],
+    [
+      7,
+      4,
+      2,
+      17,
+      1,
+      "AUDIO"
+    ],
+    [
+      8,
+      5,
+      0,
+      7,
+      0,
+      "IMAGE"
+    ],
+    [
+      9,
+      6,
+      0,
+      8,
+      1,
+      "MASK"
+    ],
+    [
+      10,
+      7,
+      0,
+      8,
+      0,
+      "MASK"
+    ],
+    [
+      11,
+      8,
+      0,
+      14,
+      4,
+      "IMAGE"
+    ],
+    [
+      12,
+      8,
+      1,
+      14,
+      2,
+      "IMAGE"
+    ],
+    [
+      13,
+      9,
+      0,
+      14,
+      5,
+      "WANVIDIMAGE_CLIPEMBEDS"
+    ],
+    [
+      14,
+      10,
+      0,
+      14,
+      0,
+      "WANVAE"
+    ],
+    [
+      15,
+      10,
+      0,
+      16,
+      0,
+      "WANVAE"
+    ],
+    [
+      16,
+      12,
+      0,
+      13,
+      1,
+      "BLOCKSWAPARGS"
+    ],
+    [
+      17,
+      13,
+      0,
+      15,
+      0,
+      "WANVIDEOMODEL"
+    ],
+    [
+      18,
+      14,
+      0,
+      15,
+      1,
+      "WANVIDIMAGE_EMBEDS"
+    ],
+    [
+      19,
+      11,
+      0,
+      15,
+      2,
+      "WANVIDEOTEXTEMBEDS"
+    ],
+    [
+      20,
+      15,
+      0,
+      16,
+      1,
+      "LATENT"
+    ],
+    [
+      21,
+      16,
+      0,
+      17,
+      0,
+      "IMAGE"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.55,
+      "offset": [
+        1900,
+        1900
+      ]
+    }
+  },
+  "version": 0.4
+}

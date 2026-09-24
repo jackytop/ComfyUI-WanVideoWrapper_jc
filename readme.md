@@ -3,11 +3,12 @@
 
 ## ComfyUI-WanVideoWrapper_jc fork
 
-This fork installs next to the original ComfyUI-WanVideoWrapper: clone it into `custom_nodes/ComfyUI-WanVideoWrapper_jc`. All its node ids get a `_jc` suffix and its display names `(jc)` (e.g. `WanVideoSampler_jc`, "WanVideo Sampler (jc)"), and its torch custom ops live in the `wanvideo_jc` namespace, so the two don't clash. Use the `_jc` nodes together in a workflow: the model, embeds and sampler of one package don't mix with the other's. The example workflows other than the Wan-Animate-2 one still use the original node ids.
+This fork installs next to the original ComfyUI-WanVideoWrapper: clone it into `custom_nodes/ComfyUI-WanVideoWrapper_jc`. All its node ids get a `_jc` suffix and its display names `(jc)` (e.g. `WanVideoSampler_jc`, "WanVideo Sampler (jc)"), and its torch custom ops live in the `wanvideo_jc` namespace, so the two don't clash. Use the `_jc` nodes together in a workflow: the model, embeds and sampler of one package don't mix with the other's. The example workflows other than the Wan-Animate-2 and SCAIL-2 ones still use the original node ids.
 
-## Wan-Animate-2 and INT8 ConvRot models
+## Wan-Animate-2, SCAIL-2 and INT8 ConvRot models
 
 - [Wan-Animate-2](https://github.com/Wan-Video/Wan-Animate-2) with the new `WanVideo Animate2 Embeds (Wan-Animate-2)` node: it takes the reference image and the driving video as is (no pose/face extraction) and works with the regular `WanVideo Sampler`. Supports the base and distilled models (`log_scale` -1.3 for the distilled one), CFG with upstream's skipped uncond block, windowed long generation like upstream, context windows, and caching the pose branch (it never changes during sampling) on CPU/GPU in bf16 or int8. See `example_workflows/wanvideo_WanAnimate2_example_01.json`.
+- [SCAIL-2](https://github.com/zai-org/SCAIL-2) with the new `WanVideo SCAIL2 Embeds (SCAIL-2)` node and the regular `WanVideo Sampler`: Animation and Replacement Modes, additional reference images, the colored identity masks (`WanVideo SCAIL2 Colored Mask` makes them from plain masks, one identity color per character), segment by segment long generation with clean history frames like upstream, and context windows. The loader detects SCAIL-2 checkpoints from `patch_embedding_mask`. See `example_workflows/wanvideo_SCAIL2_example_01.json`.
 - `WanVideo Model Loader` loads INT8 and INT8 ConvRot checkpoints in ComfyUI's mixed precision format (`comfy_quant` metadata) automatically with quantization `disabled`, using INT8 matmul through comfy_kitchen (ships with recent ComfyUI). `int8_dequant` dequantizes the weights on the fly instead. Unmerged LoRAs and block swap work with them, merged LoRAs don't.
 
 

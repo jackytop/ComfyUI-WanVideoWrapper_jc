@@ -526,6 +526,20 @@ class WanVideoSampler:
             log.info(f"Wan-Animate-2: pose latents {tuple(animate2_pose_latents.shape) if animate2_pose_latents is not None else None}, "
                      f"pose cache: {animate2_embeds.get('cache_device')} {animate2_embeds.get('cache_dtype')}, log_scale: {animate2_data['log_scale']}")
 
+        # region SCAIL-2 inputs
+        scail2_embeds = image_embeds.get("scail2", None)
+        scail2_data = None
+        scail2_loop = False
+        if scail2_embeds is not None:
+            if getattr(transformer, "patch_embedding_mask", None) is None or getattr(transformer, "patch_embedding_pose", None) is None:
+                raise ValueError("SCAIL-2 embeds need a SCAIL-2 model")
+            scail2_loop = scail2_embeds.get("looping", False)
+            if scail2_loop and context_options is not None:
+                raise ValueError("context_options are not compatible or necessary with SCAIL-2 segments, it already generates the video segment after segment")
+            scail2_data = {k: (v.to(device, dtype) if isinstance(v, torch.Tensor) else v) for k, v in scail2_embeds.items() if k not in ("pose_pixels", "mask_pixels")}
+            log.info(f"SCAIL-2: {'replacement' if scail2_data['replace'] else 'animation'} mode, {scail2_data['ref_latent'].shape[1]} reference(s), "
+                     f"pose latent {tuple(scail2_data['pose_latent'].shape) if 'pose_latent' in scail2_data else None}")
+
         latent_video_length = noise.shape[1]
 
         # Initialize FreeInit filter if enabled
@@ -749,7 +763,7 @@ class WanVideoSampler:
 
         # vid2vid
         noise_mask=original_image=None
-        if samples is not None and not multitalk_sampling and not wananimate_loop and not animate2_loop:
+        if samples is not None and not multitalk_sampling and not wananimate_loop and not animate2_loop and not scail2_loop:
             saved_generator_state = samples.get("generator_state", None)
             if saved_generator_state is not None:
                 seed_g.set_state(saved_generator_state)
@@ -993,6 +1007,9 @@ class WanVideoSampler:
         standin_input = image_embeds.get("standin_input", None)
         if standin_input is not None:
             rope_function = "comfy" # only works with this currently
+        if scail2_embeds is not None and "comfy" not in rope_function:
+            log.info("SCAIL-2 needs the comfy rope_function, switching to it")
+            rope_function = "comfy"
 
         freqs = None
 
@@ -1450,6 +1467,17 @@ class WanVideoSampler:
                     else:
                         scail_data_in = scail_data
 
+                # SCAIL-2: 4 mask channels on the video, ones on the clean history frames of a continued segment
+                scail2_in = None
+                if scail2_data is not None:
+                    history_mask = scail2_data.get("history_mask", None)
+                    z = torch.cat([z, history_mask.to(z) if history_mask is not None else torch.zeros_like(z[:4])])
+                    scail2_in = scail2_data
+                    if context_window is not None and scail2_data.get("pose_latent", None) is not None:
+                        scail2_in = {**scail2_data, "pose_latent": scail2_data["pose_latent"][:, context_window],
+                                     "driving_mask": scail2_data["driving_mask"][:, context_window]}
+                    seq_len = math.ceil((z.shape[2] * z.shape[3]) / 4 * z.shape[1]) # the model adds the references and pose, RoPE covers no padding
+
                 if wanmove_embeds is not None and context_window is not None:
                     image_cond_input = replace_feature(image_cond_input.unsqueeze(0), track_pos[:, context_window].unsqueeze(0), wanmove_embeds.get("strength", 1.0))[0]
 
@@ -1535,6 +1563,7 @@ class WanVideoSampler:
                     "one_to_all_input": one_to_all_data, # One-to-All input
                     "one_to_all_controlnet_strength": one_to_all_data["controlnet_strength"] if one_to_all_data is not None else 0.0,
                     "scail_input": scail_data_in, # SCAIL input
+                    "scail2_input": scail2_in, # SCAIL-2 references, masks and pose
                     "dual_control_input": dual_control_in, # LongVie2 dual control input
                     "animate2_input": animate2_input, # Wan-Animate-2 pose branch
                     "transformer_options": transformer_options,
@@ -1752,7 +1781,7 @@ class WanVideoSampler:
             from .latent_preview import prepare_callback #custom for tiny VAE previews
         callback = prepare_callback(patcher, len(timesteps))
 
-        if not multitalk_sampling and not framepack and not wananimate_loop and not animate2_loop:
+        if not multitalk_sampling and not framepack and not wananimate_loop and not animate2_loop and not scail2_loop:
             log.info("-" * 10 + " Sampling start " + "-" * 10)
             log.info(f"{(latent_video_length-1) * 4 + 1} frames at {latent.shape[3]*vae_upscale_factor}x{latent.shape[2]*vae_upscale_factor} (Input sequence length: {seq_len}) with {steps-ttm_start_step} steps")
 
@@ -1839,7 +1868,7 @@ class WanVideoSampler:
             try:
                 pbar = ProgressBar(len(timesteps) - ttm_start_step)
                 #region main loop start
-                for idx, t in enumerate(tqdm(timesteps[ttm_start_step:], disable=multitalk_sampling or wananimate_loop or animate2_loop)):
+                for idx, t in enumerate(tqdm(timesteps[ttm_start_step:], disable=multitalk_sampling or wananimate_loop or animate2_loop or scail2_loop)):
 
                     if bidirectional_sampling:
                         latent_flipped = torch.flip(latent, dims=[1])
@@ -2340,6 +2369,104 @@ class WanVideoSampler:
                             gen_video_list.append(videos)
                             del videos
 
+                        gen_video_samples = torch.cat(gen_video_list, dim=1)[:, :total_frames]
+                        if force_offload and not model["auto_cpu_offload"]:
+                            offload_transformer(transformer)
+                        try:
+                            print_memory(device)
+                            torch.cuda.reset_peak_memory_stats(device)
+                        except Exception:
+                            pass
+                        return {"video": gen_video_samples.permute(1, 2, 3, 0)},
+                    # region SCAIL-2 segment loop
+                    elif scail2_loop:
+                        # as upstream: segments of segment_len frames, each starting with the last segment_overlap frames of the previous one as clean history
+                        from .SCAIL.nodes import scail2_mask_to_latent
+                        total_frames = scail2_embeds["num_frames"]
+                        seg_len, overlap = scail2_embeds["segment_len"], scail2_embeds["segment_overlap"]
+                        pose_pixels, mask_pixels = scail2_embeds["pose_pixels"], scail2_embeds["mask_pixels"] # [T, 3, H/2, W/2] in 0-1
+                        lat_h, lat_w = image_embeds["lat_h"], image_embeds["lat_w"]
+                        lat_t = (seg_len - 1) // 4 + 1
+                        stride = seg_len - overlap
+                        num_segments = math.ceil((total_frames - seg_len) / stride) + 1
+                        padded_len = seg_len + (num_segments - 1) * stride
+                        if pose_pixels is not None and pose_pixels.shape[0] < padded_len:
+                            from .utils import tensor_pingpong_pad
+                            pose_pixels = tensor_pingpong_pad(pose_pixels.movedim(0, 1), padded_len).movedim(1, 0)
+                            mask_pixels = tensor_pingpong_pad(mask_pixels.movedim(0, 1), padded_len).movedim(1, 0)
+
+                        callback = prepare_callback(patcher, num_segments * len(timesteps))
+                        log.info(f"SCAIL-2: sampling {total_frames} frames in {num_segments} segments of {seg_len} frames with {overlap} frames of overlap, "
+                                 f"at {lat_w * vae_upscale_factor}x{lat_h * vae_upscale_factor} with {steps} steps")
+                        scail2_base = scail2_data
+                        gen_video_list = []
+                        prev_history = None
+                        step_iteration_count = 0
+                        for seg_idx in range(num_segments):
+                            seg_start = seg_idx * stride
+                            self.cache_state = [None, None]
+                            mm.soft_empty_cache()
+
+                            scail2_data = dict(scail2_base)
+                            vae.to(device)
+                            if pose_pixels is not None:
+                                seg_pose = pose_pixels[seg_start:seg_start + seg_len].movedim(0, 1) * 2 - 1
+                                scail2_data["pose_latent"] = vae.encode([seg_pose.to(device, vae.dtype)], device, tiled=tiled_vae, pbar=False)[0].to(dtype)
+                                scail2_data["driving_mask"] = scail2_mask_to_latent(mask_pixels[seg_start:seg_start + seg_len]).to(device, dtype)
+                                del seg_pose
+                            history_latent = None
+                            if prev_history is not None:
+                                history_latent = vae.encode([prev_history.to(device, vae.dtype)], device, tiled=tiled_vae, pbar=False)[0].to(dtype)
+                                history_t = min(history_latent.shape[1], lat_t)
+                                history_latent = history_latent[:, :history_t]
+                                history_mask = torch.zeros(4, lat_t, lat_h, lat_w, device=device, dtype=dtype)
+                                history_mask[:, :history_t] = 1
+                                scail2_data["history_mask"] = history_mask
+                            vae.to(offload_device)
+                            mm.soft_empty_cache()
+
+                            noise = torch.randn(16, lat_t, lat_h, lat_w, dtype=torch.float32, device=torch.device("cpu"), generator=seed_g).to(device)
+                            if isinstance(scheduler, dict):
+                                sample_scheduler = copy.deepcopy(scheduler["sample_scheduler"])
+                                timesteps = scheduler["timesteps"]
+                            else:
+                                sample_scheduler, timesteps, _, _ = get_scheduler(scheduler, total_steps, start_step, end_step, shift, device, transformer.dim, denoise_strength, sigmas=sigmas)
+
+                            if len(text_embeds["prompt_embeds"]) > 1:
+                                positive = [text_embeds["prompt_embeds"][min(seg_idx, len(text_embeds["prompt_embeds"]) - 1)]]
+                            else:
+                                positive = text_embeds["prompt_embeds"]
+
+                            latent = noise
+                            sampling_pbar = tqdm(total=len(timesteps), desc=f"Segment {seg_idx + 1}/{num_segments}, frames {seg_start}-{seg_start + seg_len - 1}", position=0, leave=True)
+                            for i in range(len(timesteps)):
+                                if history_latent is not None:
+                                    latent[:, :history_latent.shape[1]] = history_latent.to(latent)
+                                timestep = timesteps[i].reshape(1).to(device)
+                                noise_pred, _, self.cache_state = predict_with_cfg(
+                                    latent, cfg[min(i, len(cfg) - 1)], positive, text_embeds["negative_prompt_embeds"], timestep, i,
+                                    cache_state=self.cache_state, clip_fea=clip_fea)
+                                if callback is not None:
+                                    callback_latent = (latent - noise_pred.to(latent) * timestep.to(latent) / 1000).detach().permute(1, 0, 2, 3)
+                                    callback(step_iteration_count, callback_latent, None, num_segments * len(timesteps))
+                                    del callback_latent
+                                step_iteration_count += 1
+                                sampling_pbar.update(1)
+                                latent = sample_scheduler.step(noise_pred.unsqueeze(0), timestep, latent.unsqueeze(0), **scheduler_step_args)[0].squeeze(0)
+                                del noise_pred
+                            if history_latent is not None:
+                                latent[:, :history_latent.shape[1]] = history_latent.to(latent)
+                            sampling_pbar.close()
+
+                            vae.to(device)
+                            videos = vae.decode(latent.unsqueeze(0).to(device, vae.dtype), device=device, tiled=tiled_vae, pbar=False)[0].cpu().float()
+                            vae.to(offload_device)
+                            del latent, noise, history_latent
+                            prev_history = videos[:, -overlap:].clone()
+                            gen_video_list.append(videos if seg_idx == 0 else videos[:, overlap:])
+                            del videos
+
+                        scail2_data = scail2_base
                         gen_video_samples = torch.cat(gen_video_list, dim=1)[:, :total_frames]
                         if force_offload and not model["auto_cpu_offload"]:
                             offload_transformer(transformer)
