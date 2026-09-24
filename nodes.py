@@ -1368,6 +1368,169 @@ class WanVideoAnimateEmbeds:
 
         return (image_embeds,)
 
+# region Wan-Animate-2
+def resize_frames(images, width, height, mode="crop"):
+    """IMAGE [T, H, W, C] -> [C, T, height, width] in [-1, 1]"""
+    images = images[..., :3].movedim(-1, 1)
+    if images.shape[2] != height or images.shape[3] != width:
+        if mode == "pad": # letterbox like upstream, black bars
+            scale = min(width / images.shape[3], height / images.shape[2])
+            new_w, new_h = max(1, round(images.shape[3] * scale)), max(1, round(images.shape[2] * scale))
+            resized = common_upscale(images, new_w, new_h, "lanczos", "disabled")
+            padded = torch.zeros(images.shape[0], 3, height, width, dtype=resized.dtype)
+            top, left = (height - new_h) // 2, (width - new_w) // 2
+            padded[:, :, top:top + new_h, left:left + new_w] = resized
+            images = padded
+        else:
+            images = common_upscale(images, width, height, "lanczos", "center" if mode == "crop" else "disabled")
+    return (images.movedim(0, 1) * 2 - 1).clamp(-1, 1)
+
+class WanVideoAnimate2Embeds:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "vae": ("WANVAE",),
+            "width": ("INT", {"default": 832, "min": 64, "max": 8096, "step": 16, "tooltip": "Output width"}),
+            "height": ("INT", {"default": 480, "min": 64, "max": 8096, "step": 16, "tooltip": "Output height"}),
+            "num_frames": ("INT", {"default": 81, "min": 1, "max": 10000, "step": 4, "tooltip": "Number of frames to generate, the pose video is trimmed or ping-pong padded to this length"}),
+            "frame_window_size": ("INT", {"default": 81, "min": 5, "max": 10000, "step": 4, "tooltip": "Frames per generation window. Longer videos are generated window after window, each one continuing from the last frame of the previous one, as upstream does. The model is trained on 81"}),
+            "force_offload": ("BOOLEAN", {"default": True}),
+            "pose_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01, "tooltip": "Scales the pose video's influence (its attention values). 1.0 is the trained behaviour"}),
+            "reference_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01, "tooltip": "Scales how strongly the generated frames attend to the reference image. Below 1.0 loosens the identity, above tightens it"}),
+            "log_scale": ("FLOAT", {"default": 0.0, "min": -10.0, "max": 10.0, "step": 0.1, "tooltip": "Attention logit bias on the first generated latent frame. Upstream uses 0.0 for the base model and -1.3 for the distilled model"}),
+            "uncond_skip_block": ("INT", {"default": 9, "min": -1, "max": 100, "step": 1, "tooltip": "Upstream skips this transformer block in the unconditional (negative) pass of CFG, -1 disables. No effect with cfg 1.0"}),
+            "pose_start_percent": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "Sampling percent at which the pose influence starts, outside of the range the pose branch is skipped entirely"}),
+            "pose_end_percent": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "Sampling percent at which the pose influence ends"}),
+            "pose_cache": (["cpu", "gpu", "disabled"], {"default": "cpu", "tooltip": "The pose branch doesn't change during sampling, caching its per-block activations roughly halves the sampling time. "
+                           "Costs ~12 GB (bf16) at 832x480x81 and scales with resolution and length, it's skipped automatically when there isn't enough free memory"}),
+            "pose_cache_dtype": (["default", "int8"], {"default": "default", "tooltip": "int8 halves the pose cache memory, with Hadamard rotated per-token quantization to keep it accurate"}),
+            "resize_mode": (["crop", "pad", "stretch"], {"default": "crop", "tooltip": "How the reference image and pose video are fit to the output size: center crop, letterbox (upstream) or stretch"}),
+            },
+            "optional": {
+                "ref_image": ("IMAGE", {"tooltip": "The character to animate"}),
+                "pose_images": ("IMAGE", {"tooltip": "The driving video, its motion is transferred to the reference character"}),
+                "clip_embeds": ("WANVIDIMAGE_CLIPEMBEDS", {"tooltip": "Clip vision encoded reference image"}),
+                "pose_clip_embeds": ("WANVIDIMAGE_CLIPEMBEDS", {"tooltip": "Clip vision encoded first frame of the pose video, upstream uses this for the pose branch. Defaults to clip_embeds"}),
+                "pose_text_embeds": ("WANVIDEOTEXTEMBEDS", {"tooltip": "Prompt for the pose branch, describing the driving video rather than the character. Upstream default is '人物动作的参考视频'. Defaults to the positive prompt"}),
+                "continue_motion": ("IMAGE", {"tooltip": "Previous video to continue from, its last frame is used as the first frame. The first output frame then repeats it"}),
+                "tiled_vae": ("BOOLEAN", {"default": False, "tooltip": "Use tiled VAE encoding for reduced memory use"}),
+            }
+        }
+
+    RETURN_TYPES = ("WANVIDIMAGE_EMBEDS",)
+    RETURN_NAMES = ("image_embeds",)
+    FUNCTION = "process"
+    CATEGORY = "WanVideoWrapper"
+    DESCRIPTION = "Embeds for Wan-Animate-2 (https://github.com/Wan-Video/Wan-Animate-2): animates the reference image with the motion of the pose video. Use with a Wan-Animate-2 model and the regular WanVideo Sampler"
+
+    def process(self, vae, width, height, num_frames, frame_window_size, force_offload, pose_strength, reference_strength, log_scale, uncond_skip_block,
+                pose_start_percent, pose_end_percent, pose_cache, pose_cache_dtype, resize_mode, ref_image=None, pose_images=None, clip_embeds=None,
+                pose_clip_embeds=None, pose_text_embeds=None, continue_motion=None, tiled_vae=False):
+        from .utils import tensor_pingpong_pad
+        if pose_start_percent > pose_end_percent:
+            raise ValueError(f"pose_start_percent ({pose_start_percent}) must not be greater than pose_end_percent ({pose_end_percent})")
+        if pose_images is None:
+            log.warning("Wan-Animate-2: no pose_images given, generating without the pose branch")
+
+        W, H = (width // 16) * 16, (height // 16) * 16
+        lat_h, lat_w = H // vae.upsampling_factor, W // vae.upsampling_factor
+        num_frames = ((num_frames - 1) // 4) * 4 + 1
+        frame_window_size = ((frame_window_size - 1) // 4) * 4 + 1
+        looping = num_frames > frame_window_size
+        window = frame_window_size if looping else num_frames
+        window_latents = (window - 1) // 4 + 1
+
+        mm.soft_empty_cache()
+        vae.to(device)
+
+        # reference image slot: frame 0 of the generation latent, fully known
+        if ref_image is None:
+            ref_pixels = torch.zeros(3, 1, H, W)
+        else:
+            ref_pixels = resize_frames(ref_image[:1], W, H, resize_mode)
+        ref_latent = vae.encode([ref_pixels.to(device, vae.dtype)], device, tiled=tiled_vae)[0].to(offload_device)
+        ref_cond = torch.cat([torch.ones(4, 1, lat_h, lat_w, dtype=ref_latent.dtype), ref_latent]) # mask | latent
+
+        continue_frame = None
+        if continue_motion is not None:
+            continue_frame = resize_frames(continue_motion[-1:], W, H, resize_mode)
+
+        pose_pixels = None
+        if pose_images is not None:
+            pose_pixels = resize_frames(pose_images, W, H, resize_mode)
+            if pose_pixels.shape[1] == 1:
+                pose_pixels = pose_pixels.repeat(1, num_frames, 1, 1)
+            elif pose_pixels.shape[1] < num_frames:
+                log.info(f"Wan-Animate-2: ping-pong padding the pose video from {pose_pixels.shape[1]} to {num_frames} frames")
+                pose_pixels = tensor_pingpong_pad(pose_pixels, num_frames)
+            pose_pixels = pose_pixels[:, :num_frames]
+
+        animate2 = {
+            "pose_text_embeds": [pose_text_embeds["prompt_embeds"][0]] if pose_text_embeds is not None else None,
+            "clip_fea_pose": pose_clip_embeds.get("clip_embeds", None) if pose_clip_embeds is not None else None,
+            "pose_strength": pose_strength,
+            "reference_strength": reference_strength,
+            "log_scale": log_scale,
+            "skip_block_uncond": uncond_skip_block,
+            "start_percent": pose_start_percent,
+            "end_percent": pose_end_percent,
+            "cache_device": pose_cache,
+            "cache_dtype": pose_cache_dtype,
+            "looping": looping,
+        }
+
+        image_embeds = {
+            "clip_context": clip_embeds.get("clip_embeds", None) if clip_embeds is not None else None,
+            "negative_clip_context": clip_embeds.get("negative_clip_embeds", None) if clip_embeds is not None else None,
+            "lat_h": lat_h,
+            "lat_w": lat_w,
+            "vae": vae,
+            "tiled_vae": tiled_vae,
+            "has_ref": True, # the decoder drops the reference slot
+            "animate2": animate2,
+        }
+
+        if not looping:
+            # the video part is encoded on its own, grey except for the optional continuation frame
+            video_pixels = torch.zeros(3, num_frames, H, W)
+            mask = torch.zeros(4, window_latents, lat_h, lat_w)
+            if continue_frame is not None:
+                video_pixels[:, :1] = continue_frame
+                mask[:, 0] = 1
+            video_latent = vae.encode([video_pixels.to(device, vae.dtype)], device, tiled=tiled_vae)[0].to(offload_device)
+            pose_latents = None
+            if pose_pixels is not None:
+                pose_latents = vae.encode([pose_pixels.to(device, vae.dtype)], device, tiled=tiled_vae)[0].to(offload_device)
+            animate2["pose_latents"] = pose_latents
+            image_embeds.update({
+                "image_embeds": torch.cat([ref_latent, video_latent], dim=1),
+                "mask": torch.cat([ref_cond[:4], mask.to(ref_cond.dtype)], dim=1),
+                "num_frames": num_frames + 4, # latent frames = the reference slot + the video
+                "max_seq_len": math.ceil(lat_h * lat_w / 4 * (window_latents + 1)),
+            })
+        else:
+            # windows are encoded by the sampler as it goes
+            log.info(f"Wan-Animate-2: {num_frames} frames in windows of {frame_window_size}")
+            animate2.update({
+                "ref_cond": ref_cond,
+                "pose_pixels": pose_pixels.to(offload_device, vae.dtype) if pose_pixels is not None else None,
+                "continue_frame": continue_frame,
+                "frame_window_size": frame_window_size,
+                "num_frames": num_frames,
+            })
+            image_embeds.update({
+                "target_shape": (16, window_latents + 1, lat_h, lat_w),
+                "num_frames": num_frames,
+                "max_seq_len": math.ceil(lat_h * lat_w / 4 * (window_latents + 1)),
+            })
+
+        if force_offload:
+            vae.model.to(offload_device)
+            mm.soft_empty_cache()
+            gc.collect()
+
+        return (image_embeds,)
+
 # region UniLumos
 class WanVideoUniLumosEmbeds:
     @classmethod
@@ -2324,6 +2487,7 @@ NODE_CLASS_MAPPINGS = {
     "WanVideoRoPEFunction": WanVideoRoPEFunction,
     "WanVideoAddPusaNoise": WanVideoAddPusaNoise,
     "WanVideoAnimateEmbeds": WanVideoAnimateEmbeds,
+    "WanVideoAnimate2Embeds": WanVideoAnimate2Embeds,
     "WanVideoAddLucyEditLatents": WanVideoAddLucyEditLatents,
     "WanVideoAddBindweaveEmbeds": WanVideoAddBindweaveEmbeds,
     "TextImageEncodeQwenVL": TextImageEncodeQwenVL,
@@ -2367,6 +2531,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "WanVideoRoPEFunction": "WanVideo RoPE Function",
     "WanVideoAddPusaNoise": "WanVideo Add Pusa Noise",
     "WanVideoAnimateEmbeds": "WanVideo Animate Embeds",
+    "WanVideoAnimate2Embeds": "WanVideo Animate2 Embeds (Wan-Animate-2)",
     "WanVideoAddLucyEditLatents": "WanVideo Add LucyEdit Latents",
     "WanVideoAddBindweaveEmbeds": "WanVideo Add Bindweave Embeds",
     "WanVideoUniLumosEmbeds": "WanVideo UniLumos Embeds",
