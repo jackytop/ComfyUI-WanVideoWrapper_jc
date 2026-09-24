@@ -69,7 +69,7 @@ def parse_int8_quant_config(state_dict):
         int8_layers[prefix] = groupsize
     return int8_layers
 
-@torch.library.custom_op("wanvideo::apply_lora", mutates_args=())
+@torch.library.custom_op("wanvideo_jc::apply_lora", mutates_args=())
 def apply_lora(weight: torch.Tensor, lora_diff_0: torch.Tensor, lora_diff_1: torch.Tensor, lora_diff_2: float, lora_strength: torch.Tensor) -> torch.Tensor:
     patch_diff = torch.mm(
         lora_diff_0.flatten(start_dim=1),
@@ -86,7 +86,7 @@ def _(weight, lora_diff_0, lora_diff_1, lora_diff_2, lora_strength):
     # Return weight with same metadata
     return weight.clone()
 
-@torch.library.custom_op("wanvideo::apply_single_lora", mutates_args=())
+@torch.library.custom_op("wanvideo_jc::apply_single_lora", mutates_args=())
 def apply_single_lora(weight: torch.Tensor, lora_diff: torch.Tensor, lora_strength: torch.Tensor) -> torch.Tensor:
     return weight + lora_diff * lora_strength
 
@@ -95,7 +95,7 @@ def _(weight, lora_diff, lora_strength):
     # Return weight with same metadata
     return weight.clone()
 
-@torch.library.custom_op("wanvideo::linear_forward", mutates_args=())
+@torch.library.custom_op("wanvideo_jc::linear_forward", mutates_args=())
 def linear_forward(input: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor | None) -> torch.Tensor:
     return torch.nn.functional.linear(input, weight, bias)
 
@@ -255,15 +255,15 @@ class CustomLinear(nn.Linear):
 
     # Custom op implementations
     def _apply_lora_custom_op(self, weight, lora_diff_0, lora_diff_1, lora_diff_2, lora_strength):
-        return torch.ops.wanvideo.apply_lora(weight, lora_diff_0, lora_diff_1,
+        return torch.ops.wanvideo_jc.apply_lora(weight, lora_diff_0, lora_diff_1,
             float(lora_diff_2) if lora_diff_2 is not None else 0.0, lora_strength
         )
 
     def _apply_single_lora_custom_op(self, weight, lora_diff, lora_strength):
-        return torch.ops.wanvideo.apply_single_lora(weight, lora_diff, lora_strength)
+        return torch.ops.wanvideo_jc.apply_single_lora(weight, lora_diff, lora_strength)
 
     def _linear_forward_custom_op(self, input, weight, bias):
-        return torch.ops.wanvideo.linear_forward(input, weight, bias)
+        return torch.ops.wanvideo_jc.linear_forward(input, weight, bias)
 
     def set_lora_diffs(self, lora_diffs, device=torch.device("cpu")):
         self.lora_diffs = []

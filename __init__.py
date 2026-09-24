@@ -52,13 +52,19 @@ OPTIONAL_MODULES = [
     (".LongVie2.nodes", "LongVie2"),
 ]
 
+# This fork installs next to the original ComfyUI-WanVideoWrapper, so its node ids and display names get a suffix
+NODE_ID_SUFFIX = "_jc"
+DISPLAY_NAME_SUFFIX = " (jc)"
+
 def register_nodes(module_path: str, name: str, optional: bool) -> None:
     """Import and register nodes from a module."""
     try:
         import importlib
         module = importlib.import_module(module_path, package=__package__)
-        NODE_CLASS_MAPPINGS.update(getattr(module, "NODE_CLASS_MAPPINGS", {}))
-        NODE_DISPLAY_NAME_MAPPINGS.update(getattr(module, "NODE_DISPLAY_NAME_MAPPINGS", {}))
+        display_names = getattr(module, "NODE_DISPLAY_NAME_MAPPINGS", {})
+        for node_id, node_class in getattr(module, "NODE_CLASS_MAPPINGS", {}).items():
+            NODE_CLASS_MAPPINGS[node_id + NODE_ID_SUFFIX] = node_class
+            NODE_DISPLAY_NAME_MAPPINGS[node_id + NODE_ID_SUFFIX] = display_names.get(node_id, node_id) + DISPLAY_NAME_SUFFIX
     except Exception as e:
         if optional:
             log.warning(f"WanVideoWrapper WARNING: {name} nodes not available: {e}")

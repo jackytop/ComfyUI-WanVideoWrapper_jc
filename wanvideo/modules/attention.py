@@ -13,7 +13,7 @@ from .attention_flash import flash_attention
 try:
     from sageattention import sageattn
 
-    @torch.library.custom_op("wanvideo::sageattn", mutates_args=())
+    @torch.library.custom_op("wanvideo_jc::sageattn", mutates_args=())
     def sageattn_func(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, attn_mask: torch.Tensor | None = None, dropout_p: float = 0.0, is_causal: bool = False, tensor_layout: str = "HND"
     ) -> torch.Tensor:
         if not (q.dtype == k.dtype == v.dtype):
@@ -28,7 +28,7 @@ try:
         # Return tensor with same shape as q
         return q.clone()
 
-    sageattn_func = torch.ops.wanvideo.sageattn
+    sageattn_func = torch.ops.wanvideo_jc.sageattn
 
     def sageattn_func_compiled(q, k, v, attn_mask=None, dropout_p=0, is_causal=False, tensor_layout="HND"):
         if not (q.dtype == k.dtype == v.dtype):
@@ -49,7 +49,7 @@ try:
     from sageattention import sageattn_varlen
     from typing import List
 
-    @torch.library.custom_op("wanvideo::sageattn_varlen", mutates_args=())
+    @torch.library.custom_op("wanvideo_jc::sageattn_varlen", mutates_args=())
     def sageattn_varlen_func(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, q_lens: List[int], k_lens: List[int], max_seqlen_q: int, max_seqlen_k: int, dropout_p: float = 0.0, is_causal: bool = False) -> torch.Tensor:
         cu_seqlens_q = torch.tensor([0] + list(torch.cumsum(torch.tensor(q_lens), dim=0)), device=q.device, dtype=torch.int32)
         cu_seqlens_k = torch.tensor([0] + list(torch.cumsum(torch.tensor(k_lens), dim=0)), device=q.device, dtype=torch.int32)
@@ -64,7 +64,7 @@ try:
     def _(q, k, v, q_lens, k_lens, max_seqlen_q, max_seqlen_k, dropout_p=0.0, is_causal=False):
         # Return tensor with same shape as q
         return q.clone()
-    sageattn_varlen_func = torch.ops.wanvideo.sageattn_varlen
+    sageattn_varlen_func = torch.ops.wanvideo_jc.sageattn_varlen
 except Exception:
     sageattn_varlen_func = attention_func_error
 
@@ -79,7 +79,7 @@ except Exception:
 
 try:
     from ...ultravico.sageattn.core import sage_attention as sageattn_ultravico
-    @torch.library.custom_op("wanvideo::sageattn_ultravico", mutates_args=())
+    @torch.library.custom_op("wanvideo_jc::sageattn_ultravico", mutates_args=())
     def sageattn_func_ultravico(qkv: List[torch.Tensor], attn_mask: torch.Tensor | None = None, dropout_p: float = 0.0, is_causal: bool = False, multi_factor: float = 0.9, frame_tokens: int = 1536
     ) -> torch.Tensor:
         return sageattn_ultravico(qkv, attn_mask=attn_mask, dropout_p=dropout_p, is_causal=is_causal, multi_factor=multi_factor, frame_tokens=frame_tokens)
@@ -87,7 +87,7 @@ try:
     @sageattn_func_ultravico.register_fake
     def _(qkv, attn_mask=None, dropout_p=0.0, is_causal=False, multi_factor=0.9):
         return torch.empty_like(qkv[0]).contiguous()
-    sageattn_func_ultravico = torch.ops.wanvideo.sageattn_ultravico
+    sageattn_func_ultravico = torch.ops.wanvideo_jc.sageattn_ultravico
 except Exception:
     sageattn_func_ultravico = attention_func_error
 
