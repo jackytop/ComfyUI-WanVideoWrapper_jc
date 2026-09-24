@@ -701,13 +701,14 @@ def check_duplicate_nodes():
 
     wanvideo_dirs = []
 
-    # Check all directories in custom_nodes
+    # Check all directories in custom_nodes, the original ComfyUI-WanVideoWrapper can be installed alongside this _jc fork
     for path in custom_nodes_dir.iterdir():
         if (path.is_dir() and
             path != current_path and
             not path.name.endswith('.disabled') and
             'wanvideo' in path.name.lower() and
-            'wrapper' in path.name.lower()):
+            'wrapper' in path.name.lower() and
+            path.name.lower().endswith('_jc')):
             wanvideo_dirs.append(str(path))
 
     return wanvideo_dirs

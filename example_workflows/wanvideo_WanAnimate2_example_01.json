@@ -168,7 +168,7 @@
     },
     {
       "id": 4,
-      "type": "WanVideoClipVisionEncode",
+      "type": "WanVideoClipVisionEncode_jc",
       "pos": [
         -1000,
         100
@@ -214,8 +214,8 @@
         }
       ],
       "properties": {
-        "cnr_id": "ComfyUI-WanVideoWrapper",
-        "Node name for S&R": "WanVideoClipVisionEncode"
+        "Node name for S&R": "WanVideoClipVisionEncode_jc",
+        "aux_id": "jackytop/ComfyUI-WanVideoWrapper_jc"
       },
       "widgets_values": [
         1,
@@ -231,7 +231,7 @@
     },
     {
       "id": 5,
-      "type": "WanVideoVAELoader",
+      "type": "WanVideoVAELoader_jc",
       "pos": [
         -1400,
         330
@@ -262,8 +262,8 @@
         }
       ],
       "properties": {
-        "cnr_id": "ComfyUI-WanVideoWrapper",
-        "Node name for S&R": "WanVideoVAELoader"
+        "Node name for S&R": "WanVideoVAELoader_jc",
+        "aux_id": "jackytop/ComfyUI-WanVideoWrapper_jc"
       },
       "widgets_values": [
         "wanvideo\\Wan2_1_VAE_bf16.safetensors",
@@ -276,7 +276,7 @@
     },
     {
       "id": 6,
-      "type": "WanVideoTextEncodeCached",
+      "type": "WanVideoTextEncodeCached_jc",
       "pos": [
         -1000,
         420
@@ -316,8 +316,8 @@
         }
       ],
       "properties": {
-        "cnr_id": "ComfyUI-WanVideoWrapper",
-        "Node name for S&R": "WanVideoTextEncodeCached"
+        "Node name for S&R": "WanVideoTextEncodeCached_jc",
+        "aux_id": "jackytop/ComfyUI-WanVideoWrapper_jc"
       },
       "widgets_values": [
         "umt5-xxl-enc-bf16.safetensors",
@@ -334,7 +334,7 @@
     },
     {
       "id": 7,
-      "type": "WanVideoTextEncodeCached",
+      "type": "WanVideoTextEncodeCached_jc",
       "pos": [
         -1000,
         830
@@ -374,8 +374,8 @@
         }
       ],
       "properties": {
-        "cnr_id": "ComfyUI-WanVideoWrapper",
-        "Node name for S&R": "WanVideoTextEncodeCached"
+        "Node name for S&R": "WanVideoTextEncodeCached_jc",
+        "aux_id": "jackytop/ComfyUI-WanVideoWrapper_jc"
       },
       "widgets_values": [
         "umt5-xxl-enc-bf16.safetensors",
@@ -392,7 +392,7 @@
     },
     {
       "id": 8,
-      "type": "WanVideoBlockSwap",
+      "type": "WanVideoBlockSwap_jc",
       "pos": [
         -1400,
         -1000
@@ -415,8 +415,8 @@
         }
       ],
       "properties": {
-        "cnr_id": "ComfyUI-WanVideoWrapper",
-        "Node name for S&R": "WanVideoBlockSwap"
+        "Node name for S&R": "WanVideoBlockSwap_jc",
+        "aux_id": "jackytop/ComfyUI-WanVideoWrapper_jc"
       },
       "widgets_values": [
         20,
@@ -432,7 +432,7 @@
     },
     {
       "id": 9,
-      "type": "WanVideoModelLoader",
+      "type": "WanVideoModelLoader_jc",
       "pos": [
         -1000,
         -1250
@@ -504,8 +504,8 @@
         }
       ],
       "properties": {
-        "cnr_id": "ComfyUI-WanVideoWrapper",
-        "Node name for S&R": "WanVideoModelLoader"
+        "Node name for S&R": "WanVideoModelLoader_jc",
+        "aux_id": "jackytop/ComfyUI-WanVideoWrapper_jc"
       },
       "widgets_values": [
         "WanVideo\\Wan2_2-Animate-2-14B_int8_convrot.safetensors",
@@ -520,7 +520,7 @@
     },
     {
       "id": 10,
-      "type": "WanVideoAnimate2Embeds",
+      "type": "WanVideoAnimate2Embeds_jc",
       "pos": [
         -350,
         -400
@@ -593,8 +593,8 @@
         }
       ],
       "properties": {
-        "cnr_id": "ComfyUI-WanVideoWrapper",
-        "Node name for S&R": "WanVideoAnimate2Embeds"
+        "Node name for S&R": "WanVideoAnimate2Embeds_jc",
+        "aux_id": "jackytop/ComfyUI-WanVideoWrapper_jc"
       },
       "widgets_values": [
         832,
@@ -616,7 +616,7 @@
     },
     {
       "id": 11,
-      "type": "WanVideoSampler",
+      "type": "WanVideoSampler_jc",
       "pos": [
         150,
         -500
@@ -745,8 +745,8 @@
         }
       ],
       "properties": {
-        "cnr_id": "ComfyUI-WanVideoWrapper",
-        "Node name for S&R": "WanVideoSampler"
+        "Node name for S&R": "WanVideoSampler_jc",
+        "aux_id": "jackytop/ComfyUI-WanVideoWrapper_jc"
       },
       "widgets_values": [
         40,
@@ -767,7 +767,7 @@
     },
     {
       "id": 12,
-      "type": "WanVideoDecode",
+      "type": "WanVideoDecode_jc",
       "pos": [
         550,
         -500
@@ -801,8 +801,8 @@
         }
       ],
       "properties": {
-        "cnr_id": "ComfyUI-WanVideoWrapper",
-        "Node name for S&R": "WanVideoDecode"
+        "Node name for S&R": "WanVideoDecode_jc",
+        "aux_id": "jackytop/ComfyUI-WanVideoWrapper_jc"
       },
       "widgets_values": [
         false,

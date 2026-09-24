@@ -1,6 +1,10 @@
 # ComfyUI wrapper nodes for [WanVideo](https://github.com/Wan-Video/Wan2.1) and related models.
 
 
+## ComfyUI-WanVideoWrapper_jc fork
+
+This fork installs next to the original ComfyUI-WanVideoWrapper: clone it into `custom_nodes/ComfyUI-WanVideoWrapper_jc`. All its node ids get a `_jc` suffix and its display names `(jc)` (e.g. `WanVideoSampler_jc`, "WanVideo Sampler (jc)"), and its torch custom ops live in the `wanvideo_jc` namespace, so the two don't clash. Use the `_jc` nodes together in a workflow: the model, embeds and sampler of one package don't mix with the other's. The example workflows other than the Wan-Animate-2 one still use the original node ids.
+
 ## Wan-Animate-2 and INT8 ConvRot models
 
 - [Wan-Animate-2](https://github.com/Wan-Video/Wan-Animate-2) with the new `WanVideo Animate2 Embeds (Wan-Animate-2)` node: it takes the reference image and the driving video as is (no pose/face extraction) and works with the regular `WanVideo Sampler`. Supports the base and distilled models (`log_scale` -1.3 for the distilled one), CFG with upstream's skipped uncond block, windowed long generation like upstream, context windows, and caching the pose branch (it never changes during sampling) on CPU/GPU in bf16 or int8. See `example_workflows/wanvideo_WanAnimate2_example_01.json`.
