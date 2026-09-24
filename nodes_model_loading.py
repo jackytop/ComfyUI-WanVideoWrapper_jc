@@ -1666,6 +1666,11 @@ class WanVideoModelLoader:
             log.info("SCAIL model detected, patching model...")
             pose_dim = sd["patch_embedding_pose.weight"].shape[1]
             transformer.patch_embedding_pose = nn.Conv3d(pose_dim, dim, kernel_size=patch_size, stride=patch_size)
+        # SCAIL-2: additive 28 channel mask stream on the reference/video and pose tokens
+        if "patch_embedding_mask.weight" in sd:
+            log.info("SCAIL-2 model detected, adding the mask embedding...")
+            mask_dim = sd["patch_embedding_mask.weight"].shape[1]
+            transformer.patch_embedding_mask = nn.Conv3d(mask_dim, dim, kernel_size=patch_size, stride=patch_size)
 
         if "image_to_cond.conv_in.bias" in sd:
             # One-to-all

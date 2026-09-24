@@ -2337,6 +2337,37 @@ class WanModel(torch.nn.Module):
 
         return freqs
 
+    #region SCAIL-2
+    def rope_encode_scail2(self, ref_frames, video_frames, h, w, pose, replace, ntk_alphas=[1, 1, 1], device=None):
+        """RoPE for [additional refs | ref | video | pose] as upstream SCAIL-2 lays them out.
+
+        Animation mode puts the video one frame after the references, replacement mode starts it at the reference's frame
+        and moves the references 120 rows down instead. The pose sits 120 columns right, its half resolution grid gets the
+        full resolution freqs averaged over 2x2.
+        """
+        key = (ref_frames, video_frames, h, w, pose, replace, self.rope_embedder.k, tuple(ntk_alphas), str(device))
+        if getattr(self, "scail2_freqs_key", None) == key:
+            return self.scail2_freqs
+
+        def ids(t0, t, h0, w0, hh, ww):
+            grid = torch.meshgrid(torch.arange(t0, t0 + t, device=device, dtype=torch.float32),
+                                  torch.arange(h0, h0 + hh, device=device, dtype=torch.float32),
+                                  torch.arange(w0, w0 + ww, device=device, dtype=torch.float32), indexing="ij")
+            return torch.stack(grid, dim=-1).reshape(1, -1, 3)
+
+        video_t0 = ref_frames - (1 if replace else 0)
+        segments = [ids(0, ref_frames, 120 if replace else 0, 0, h, w), ids(video_t0, video_frames, 0, 0, h, w)]
+        freqs = self.rope_embedder(torch.cat(segments, dim=1), ntk_alphas).movedim(1, 2)
+        if pose:
+            pose_freqs = self.rope_embedder(ids(video_t0, video_frames, 0, 120, h, w), ntk_alphas).movedim(1, 2)
+            B, _, heads, dim = pose_freqs.shape[:4]
+            pose_freqs = pose_freqs.reshape(B, video_frames, h, w, heads, dim, 2, 2).permute(0, 1, 4, 5, 6, 7, 2, 3).reshape(-1, h, w)
+            pose_freqs = F.avg_pool2d(pose_freqs, kernel_size=2, stride=2)
+            pose_freqs = pose_freqs.reshape(B, video_frames, heads, dim, 2, 2, h // 2, w // 2).permute(0, 1, 6, 7, 2, 3, 4, 5).reshape(B, -1, heads, dim, 2, 2)
+            freqs = torch.cat([freqs, pose_freqs], dim=1)
+        self.scail2_freqs_key, self.scail2_freqs = key, freqs
+        return freqs
+
     #region Wan-Animate-2
     def animate2_prepare(self, animate2_input, grid_sizes, ntk_alphas=[1, 1, 1]):
         """Sets up the pose branch for this model call: inputs, fixed timestep modulation, context and RoPE."""
@@ -2464,6 +2495,7 @@ class WanModel(torch.nn.Module):
         sdancer_input=None,  # SteadyDancer
         one_to_all_input=None, one_to_all_controlnet_strength=0.0, # One-to-All
         scail_input=None,  # SCAIL pose
+        scail2_input=None,  # SCAIL-2 references, masks and pose
         dual_control_input=None,  # LongVie2 dual controlnet
         animate2_input=None,  # Wan-Animate-2 pose branch
         transformer_options={},
@@ -2615,6 +2647,19 @@ class WanModel(torch.nn.Module):
                 prefix_frames = 1
                 suffix_frames += 1
 
+        # SCAIL-2: [additional refs | ref] frames in front of the video, sharing its patch embedding
+        scail2_ref_frames = 0
+        if scail2_input is not None:
+            if "comfy" not in self.rope_func:
+                raise ValueError("SCAIL-2 needs the comfy rope_function")
+            scail2_refs = scail2_input["ref_latent"].to(x[0])  # [16 + 4 ones, refs, H, W], the main reference last
+            scail2_ref_frames = scail2_refs.shape[1]
+            x = [torch.cat([scail2_refs, u], dim=1) for u in x]
+            seq_len += math.ceil((scail2_refs.shape[-1] * scail2_refs.shape[-2]) / 4 * scail2_ref_frames)
+            F += scail2_ref_frames
+            prefix_frames = scail2_ref_frames
+            suffix_frames += scail2_ref_frames
+
         #uni3c controlnet
         if uni3c_data is not None:
             render_latent = uni3c_data["render_latent"].to(self.base_dtype)
@@ -2644,6 +2689,14 @@ class WanModel(torch.nn.Module):
             else:
                 self.original_patch_embedding.to(self.main_device)
                 x = [self.original_patch_embedding(u.unsqueeze(0).to(torch.float32)).to(x[0].dtype) for u in x]
+
+        # SCAIL-2 mask stream: the reference masks, then zeros for the video frames
+        if scail2_input is not None:
+            ref_mask = scail2_input["ref_mask"]
+            mask = torch.cat([ref_mask, ref_mask.new_zeros(ref_mask.shape[0], x[0].shape[2] - ref_mask.shape[1], *ref_mask.shape[2:])], dim=1)
+            mask_emb = self.patch_embedding_mask(mask.unsqueeze(0).to(self.main_device, self.patch_embedding_mask.weight.dtype)).to(x[0].dtype)
+            x = [u + mask_emb for u in x]
+            del mask, mask_emb
 
         # ovi audio model
         if self.audio_model is not None:
@@ -2715,6 +2768,23 @@ class WanModel(torch.nn.Module):
                 seq_len += scail_x[0].shape[1]
                 del scail_x
                 pose_frame_shape = scail_pose_latents.shape
+
+        # SCAIL-2 pose: half resolution driving video tokens plus their mask stream, at the end of the sequence
+        scail2_pose = False
+        if scail2_input is not None:
+            pose_latent = scail2_input.get("pose_latent", None)
+            if pose_latent is not None and scail2_input.get("start_percent", 0.0) <= current_step_percentage <= scail2_input.get("end_percent", 1.0):
+                pose_latent = pose_latent.to(self.main_device, torch.float32)
+                pose_in = torch.cat([pose_latent, torch.ones_like(pose_latent[:4])]).unsqueeze(0)
+                pose_emb = self.patch_embedding_pose(pose_in.to(self.patch_embedding_pose.weight.dtype))
+                pose_emb = pose_emb + self.patch_embedding_mask(scail2_input["driving_mask"].unsqueeze(0).to(self.main_device, self.patch_embedding_mask.weight.dtype))
+                pose_x = pose_emb.to(x[0].dtype).flatten(2).transpose(1, 2) * scail2_input.get("pose_strength", 1.0)
+                x = [torch.cat([u, pose_x], dim=1) for u in x]
+                seq_len += pose_x.shape[1]
+                scail2_pose = True
+                del pose_in, pose_emb, pose_x
+            freqs = self.rope_encode_scail2(scail2_ref_frames, f - scail2_ref_frames, h, w, scail2_pose,
+                                            scail2_input.get("replace", False), ntk_alphas=ntk_alphas, device=x[0].device)
 
         seq_lens = torch.tensor([u.size(1) for u in x], dtype=torch.int32)
         assert seq_lens.max() <= seq_len, f"max seq len {seq_lens.max()} exceeds provided seq_len {seq_len}"
