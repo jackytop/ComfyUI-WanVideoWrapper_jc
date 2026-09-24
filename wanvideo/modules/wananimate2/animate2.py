@@ -154,10 +154,9 @@ class Animate2PoseCache:
             self._max_pinned_bytes = 0
 
     def select(self, key):
-        for s in self.slots:
+        for i, s in enumerate(self.slots):
             if s["key"].shape == key.shape and torch.equal(s["key"], key.to(s["key"].device)):
-                self.slots.remove(s)
-                self.slots.append(s)
+                self.slots.append(self.slots.pop(i))  # by index, list.remove would compare the key tensors
                 self.slot = s
                 return True
         self.slot = None

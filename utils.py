@@ -229,12 +229,10 @@ def get_module_memory_mb(module):
 
 def get_module_memory_mb_per_device(module):
     memory_per_device = {}
-    memory = 0
     for param in module.parameters():
         if param.data is not None:
             device = str(param.device)
-            memory += param.nelement() * param.element_size()
-            memory_per_device[device] = memory_per_device.get(device, 0) + memory
+            memory_per_device[device] = memory_per_device.get(device, 0) + param.nelement() * param.element_size()
 
     memory_per_device = {dev: mem / (1024 * 1024) for dev, mem in memory_per_device.items()}
     return memory_per_device
