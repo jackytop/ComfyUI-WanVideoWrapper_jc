@@ -89,20 +89,33 @@ def animate2_attention(q, k, v, k_pose, v_pose, frames, hw, attention_mode="sdpa
 
 
 def _animate2_attention_biased(q, k, v, k_pose, v_pose, pose_frames, hw, attention_mode, log_scale, first=1):
-    # a key-group logit bias can't be expressed with the regular kernels, so the attention is split into
-    # key groups (first video frame | other generation frames | per-frame pose) and merged by logsumexp
+    # a key-group logit bias can't be expressed with the regular kernels, so the attention is split into key groups
+    # (frames before the first video frame | the first video frame, biased | later frames | per-frame pose) and merged
+    # by logsumexp one group at a time. The groups are views of k/v, so only the running output and one group's output
+    # are alive at once.
     B, L, H, D = q.shape
-    k_rest = torch.cat([k[:, :first * hw], k[:, (first + 1) * hw:]], dim=1)
-    v_rest = torch.cat([v[:, :first * hw], v[:, (first + 1) * hw:]], dim=1)
-    out_f1, lse_f1 = attention_lse(q, k[:, first * hw:(first + 1) * hw], v[:, first * hw:(first + 1) * hw], attention_mode)
-    out_rest, lse_rest = attention_lse(q, k_rest, v_rest, attention_mode)
-    del k_rest, v_rest
-    lse_f1 = lse_f1 + log_scale
 
-    lse_max = torch.maximum(lse_f1, lse_rest)
-    w_f1 = torch.exp(lse_f1 - lse_max)
-    w_rest = torch.exp(lse_rest - lse_max)
-    denom = w_f1 + w_rest
+    def weight(w):  # [B, H, L] -> [B, L, H, 1]
+        return w.transpose(1, 2).unsqueeze(-1).to(q.dtype)
+
+    def merge(out, lse, out_g, lse_g):  # in place into out, returns the merged lse
+        new = torch.logaddexp(lse, lse_g)
+        out.mul_(weight(torch.exp(lse - new))).addcmul_(out_g, weight(torch.exp(lse_g - new)))
+        return new
+
+    out = lse = None
+    for start, end, bias in ((0, first, 0.0), (first, first + 1, log_scale), (first + 1, None, 0.0)):
+        k_g, v_g = k[:, start * hw:None if end is None else end * hw], v[:, start * hw:None if end is None else end * hw]
+        if k_g.shape[1] == 0:
+            continue
+        out_g, lse_g = attention_lse(q, k_g, v_g, attention_mode)
+        if bias != 0.0:
+            lse_g = lse_g + bias
+        if out is None:
+            out, lse = out_g, lse_g
+        else:
+            lse = merge(out, lse, out_g, lse_g)
+        del out_g, lse_g
 
     if pose_frames > 0:
         # query frame first + j against pose frame j, batched over the frames
@@ -113,22 +126,7 @@ def _animate2_attention_biased(q, k, v, k_pose, v_pose, pose_frames, hw, attenti
                                            v_pose[:, :n * hw].reshape(B * n, hw, H, D), attention_mode)
         out_pose = out_pose.reshape(B, n * hw, H, D)
         lse_pose = lse_pose.reshape(B, n, H, hw).transpose(1, 2).reshape(B, H, n * hw)
-
-        new_max = torch.maximum(lse_max[..., pose_range], lse_pose)
-        rescale = torch.exp(lse_max[..., pose_range] - new_max)
-        w_f1[..., pose_range] *= rescale
-        w_rest[..., pose_range] *= rescale
-        w_pose = torch.exp(lse_pose - new_max)
-        denom[..., pose_range] = w_f1[..., pose_range] + w_rest[..., pose_range] + w_pose
-
-    def weight(w, d):  # [B, H, L] -> [B, L, H, 1], normalized
-        return (w / d).transpose(1, 2).unsqueeze(-1).to(q.dtype)
-
-    out = out_f1 * weight(w_f1, denom)
-    out.addcmul_(out_rest, weight(w_rest, denom))
-    del out_f1, out_rest
-    if pose_frames > 0:
-        out[:, pose_range].addcmul_(out_pose, weight(w_pose, denom[..., pose_range]))
+        merge(out[:, pose_range], lse[..., pose_range], out_pose, lse_pose)
     return out
 
 
