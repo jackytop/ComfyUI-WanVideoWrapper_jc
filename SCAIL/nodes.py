@@ -42,7 +42,8 @@ class WanVideoSCAIL2Embeds:
                     "width": ("INT", {"default": 512, "min": 64, "max": 8096, "step": 32, "tooltip": "Output width, divisible by 32"}),
                     "height": ("INT", {"default": 896, "min": 64, "max": 8096, "step": 32, "tooltip": "Output height, divisible by 32"}),
                     "num_frames": ("INT", {"default": 81, "min": 1, "max": 10000, "step": 4, "tooltip": "Number of frames to generate, the pose video and its mask are trimmed or ping-pong padded to this length"}),
-                    "replacement_mode": ("BOOLEAN", {"default": False, "tooltip": "False: Animation Mode, animates the reference character with the driving video. True: Replacement Mode, replaces the masked character in the driving video with the reference"}),
+                    "replacement_mode": ("BOOLEAN", {"default": False, "tooltip": "False: Animation Mode, animates the reference character with the driving video. True: Replacement Mode, replaces the masked character in the driving video with the reference, "
+                                                  "the references are then cut out with their masks onto black as upstream expects"}),
                     "segment_len": ("INT", {"default": 81, "min": 5, "max": 10000, "step": 4, "tooltip": "Frames per generation segment. Longer videos are generated segment after segment, each continuing from the end of the previous one, as upstream does"}),
                     "segment_overlap": ("INT", {"default": 5, "min": 1, "max": 1000, "step": 4, "tooltip": "Frames of the previous segment used as clean history for the next one, upstream uses 5"}),
                     "pose_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01, "tooltip": "Scales the pose tokens"}),
@@ -80,18 +81,28 @@ class WanVideoSCAIL2Embeds:
         mm.soft_empty_cache()
         vae.to(device)
 
-        # references: the additional ones first, the main reference last, each encoded as its own single frame
         refs = scail2_resize(ref_image, W, H) if ref_image is not None else torch.zeros(1, 3, H, W)
-        refs = torch.cat([refs[1:], refs[:1]])
-        ref_latent = torch.cat([vae.encode([(r.unsqueeze(1) * 2 - 1).to(device, vae.dtype)], device, tiled=tiled_vae)[0] for r in refs], dim=1).to(offload_device)
-        ref_latent = torch.cat([ref_latent, torch.ones_like(ref_latent[:4])])
-
         if ref_mask is None:
             log.warning(f"SCAIL-2: no ref_mask, using a plain {'black' if replacement_mode else 'white'} one. The masks matter, without them animation tends to behave like replacement")
             ref_masks = torch.full((1, 3, H, W), 0.0 if replacement_mode else 1.0)
         else:
             ref_masks = scail2_resize(ref_mask, W, H)
         ref_masks = ref_masks[[min(i, ref_masks.shape[0] - 1) for i in range(refs.shape[0])]]
+
+        # Replacement Mode references show only the characters, on black like upstream's preprocessed inputs (and ComfyUI's WanSCAILToVideo):
+        # the mask's colored pixels are the matte. References without any character (e.g. a clean background) are kept as they are.
+        if replacement_mode and ref_mask is not None:
+            for i in range(refs.shape[0]):
+                is_char = (ref_masks[i].amax(dim=0, keepdim=True) > 0.1).to(refs.dtype)
+                if is_char.any():
+                    refs[i] = refs[i] * is_char
+            log.info("SCAIL-2: Replacement Mode, the references are composited on black with their masks")
+
+        # references: the additional ones first, the main reference last, each encoded as its own single frame
+        refs = torch.cat([refs[1:], refs[:1]])
+        ref_latent = torch.cat([vae.encode([(r.unsqueeze(1) * 2 - 1).to(device, vae.dtype)], device, tiled=tiled_vae)[0] for r in refs], dim=1).to(offload_device)
+        ref_latent = torch.cat([ref_latent, torch.ones_like(ref_latent[:4])])
+
         ref_masks = torch.cat([ref_masks[1:], ref_masks[:1]])
         ref_mask_latent = torch.cat([scail2_mask_to_latent(m[None]) for m in ref_masks], dim=1)
 
