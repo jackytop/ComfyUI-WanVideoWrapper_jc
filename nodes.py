@@ -1492,6 +1492,9 @@ class WanVideoAnimate2Embeds:
                 "prefix_frames": ("IMAGE", {"tooltip": "Up to 5 additional reference images of the character (other views, close-ups, outfit details). "
                                             "Each becomes a known latent frame right after the reference slot, driven by the first pose frame, and is dropped from the output. "
                                             "The model isn't trained on multiple references, this is an experimental, training free extension (after WanAnimatePlus)"}),
+                "prefix_layout": (["reference", "temporal"], {"default": "reference", "tooltip": "reference: the extra references share the reference slot's time position and get no pose frame, "
+                                  "the video frames keep their trained positions. temporal (WanAnimatePlus): they sit in the timeline right before the video, driven by the first pose frame, "
+                                  "the video can then start from them (e.g. from a back view)"}),
             }
         }
 
@@ -1503,7 +1506,7 @@ class WanVideoAnimate2Embeds:
 
     def process(self, vae, width, height, num_frames, frame_window_size, force_offload, pose_strength, reference_strength, log_scale, uncond_skip_block,
                 pose_start_percent, pose_end_percent, pose_cache, pose_cache_dtype, resize_mode, ref_image=None, pose_images=None, clip_embeds=None,
-                pose_clip_embeds=None, pose_text_embeds=None, continue_motion=None, tiled_vae=False, prefix_frames=None):
+                pose_clip_embeds=None, pose_text_embeds=None, continue_motion=None, tiled_vae=False, prefix_frames=None, prefix_layout="reference"):
         from .utils import tensor_pingpong_pad
         if pose_start_percent > pose_end_percent:
             raise ValueError(f"pose_start_percent ({pose_start_percent}) must not be greater than pose_end_percent ({pose_end_percent})")
@@ -1539,7 +1542,8 @@ class WanVideoAnimate2Embeds:
             prefix_latent = torch.cat([vae.encode([prefix_pixels[:, i:i + 1].to(device, vae.dtype)], device, tiled=tiled_vae)[0].to(offload_device)
                                        for i in range(prefix_count)], dim=1)
             prefix_cond = torch.cat([torch.ones_like(prefix_latent[:4]), prefix_latent])
-            log.info(f"Wan-Animate-2: {prefix_count} extra reference frames after the reference slot")
+            log.info(f"Wan-Animate-2: {prefix_count} extra reference frames after the reference slot, {prefix_layout} layout")
+        temporal_prefix = prefix_count > 0 and prefix_layout == "temporal"
 
         continue_frame = None
         if continue_motion is not None:
@@ -1568,6 +1572,7 @@ class WanVideoAnimate2Embeds:
             "cache_dtype": pose_cache_dtype,
             "looping": looping,
             "prefix_cond": prefix_cond,
+            "prefix_temporal": temporal_prefix, # the pose is padded for the extra references
         }
 
         image_embeds = {
@@ -1592,7 +1597,7 @@ class WanVideoAnimate2Embeds:
             pose_latents = None
             if pose_pixels is not None:
                 pose_latents = vae.encode([pose_pixels.to(device, vae.dtype)], device, tiled=tiled_vae)[0].to(offload_device)
-                if prefix_count > 0: # the extra reference frames are driven by the first pose frame
+                if temporal_prefix: # the extra reference frames are driven by the first pose frame
                     pose_latents = torch.cat([pose_latents[:, :1].repeat(1, prefix_count, 1, 1), pose_latents], dim=1)
             animate2["pose_latents"] = pose_latents
             front_cond = ref_cond if prefix_cond is None else torch.cat([ref_cond, prefix_cond], dim=1)

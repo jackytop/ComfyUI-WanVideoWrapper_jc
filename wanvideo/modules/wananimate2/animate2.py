@@ -41,16 +41,18 @@ def attention_lse(q, k, v, attention_mode="sdpa"):
     return out.transpose(1, 2), lse[..., :q.shape[1]].float()
 
 
-def animate2_attention(q, k, v, k_pose, v_pose, frames, hw, attention_mode="sdpa", log_scale=0.0, heads=None):
+def animate2_attention(q, k, v, k_pose, v_pose, frames, hw, attention_mode="sdpa", log_scale=0.0, heads=None, ref_frames=0):
     """Generation branch self-attention.
 
     q, k, v: generation tokens [B, L, H, D], RoPE applied, tokens past frames * hw are padding
     k_pose, v_pose: pose branch tokens [B or 1, pose_frames * hw, H, D], RoPE applied
-    log_scale: logit bias on the keys of generation frame 1, the distilled model uses -1.3 upstream
+    log_scale: logit bias on the keys of the first video frame (generation frame 1), the distilled model uses -1.3 upstream
+    ref_frames: extra reference frames after the reference slot, like it they have no pose frame, the video starts after them
     """
     B, L, H, D = q.shape
     valid = frames * hw
-    pose_frames = max(0, min(k_pose.shape[1] // hw, frames - 1))
+    first = 1 + ref_frames # first video frame, driven by pose frame 0
+    pose_frames = max(0, min(k_pose.shape[1] // hw, frames - first))
     if k_pose.shape[0] != B:
         k_pose, v_pose = k_pose.expand(B, -1, -1, -1), v_pose.expand(B, -1, -1, -1)
     k_gen, v_gen = k[:, :valid], v[:, :valid]
@@ -58,40 +60,41 @@ def animate2_attention(q, k, v, k_pose, v_pose, frames, hw, attention_mode="sdpa
     def attn(q_, k_, v_):  # "comfy" mode returns the heads flattened
         return attention(q_, k_, v_, attention_mode=attention_mode, heads=heads).reshape(q_.shape)
 
-    if log_scale != 0.0 and frames > 1:
-        out = _animate2_attention_biased(q[:, :valid], k_gen, v_gen, k_pose, v_pose, pose_frames, hw, attention_mode, log_scale)
+    if log_scale != 0.0 and frames > first:
+        out = _animate2_attention_biased(q[:, :valid], k_gen, v_gen, k_pose, v_pose, pose_frames, hw, attention_mode, log_scale, first)
         if L > valid:
             out = torch.cat([out, attn(q[:, valid:], k_gen, v_gen)], dim=1)
         return out
 
     out = torch.empty_like(q)
-    # the reference slot has no pose frame
-    out[:, :hw] = attn(q[:, :hw], k_gen, v_gen)
+    # the reference slot (and the extra references) have no pose frame
+    out[:, :first * hw] = attn(q[:, :first * hw], k_gen, v_gen)
     if pose_frames > 0:
         # the generation half is the same for every frame, only the pose frame at the tail is swapped
         kbuf = k.new_empty(B, valid + hw, H, D)
         vbuf = v.new_empty(B, valid + hw, H, D)
         kbuf[:, :valid] = k_gen
         vbuf[:, :valid] = v_gen
-        for j in range(1, pose_frames + 1):
-            kbuf[:, valid:] = k_pose[:, (j - 1) * hw:j * hw]
-            vbuf[:, valid:] = v_pose[:, (j - 1) * hw:j * hw]
-            out[:, j * hw:(j + 1) * hw] = attn(q[:, j * hw:(j + 1) * hw], kbuf, vbuf)
+        for j in range(pose_frames):
+            f = first + j
+            kbuf[:, valid:] = k_pose[:, j * hw:(j + 1) * hw]
+            vbuf[:, valid:] = v_pose[:, j * hw:(j + 1) * hw]
+            out[:, f * hw:(f + 1) * hw] = attn(q[:, f * hw:(f + 1) * hw], kbuf, vbuf)
         del kbuf, vbuf
     # frames past the end of the pose video, and padding
-    tail = (pose_frames + 1) * hw
+    tail = (first + pose_frames) * hw
     if tail < L:
         out[:, tail:] = attn(q[:, tail:], k_gen, v_gen)
     return out
 
 
-def _animate2_attention_biased(q, k, v, k_pose, v_pose, pose_frames, hw, attention_mode, log_scale):
+def _animate2_attention_biased(q, k, v, k_pose, v_pose, pose_frames, hw, attention_mode, log_scale, first=1):
     # a key-group logit bias can't be expressed with the regular kernels, so the attention is split into
-    # key groups (generation frame 1 | other generation frames | per-frame pose) and merged by logsumexp
+    # key groups (first video frame | other generation frames | per-frame pose) and merged by logsumexp
     B, L, H, D = q.shape
-    k_rest = torch.cat([k[:, :hw], k[:, 2 * hw:]], dim=1)
-    v_rest = torch.cat([v[:, :hw], v[:, 2 * hw:]], dim=1)
-    out_f1, lse_f1 = attention_lse(q, k[:, hw:2 * hw], v[:, hw:2 * hw], attention_mode)
+    k_rest = torch.cat([k[:, :first * hw], k[:, (first + 1) * hw:]], dim=1)
+    v_rest = torch.cat([v[:, :first * hw], v[:, (first + 1) * hw:]], dim=1)
+    out_f1, lse_f1 = attention_lse(q, k[:, first * hw:(first + 1) * hw], v[:, first * hw:(first + 1) * hw], attention_mode)
     out_rest, lse_rest = attention_lse(q, k_rest, v_rest, attention_mode)
     del k_rest, v_rest
     lse_f1 = lse_f1 + log_scale
@@ -102,9 +105,9 @@ def _animate2_attention_biased(q, k, v, k_pose, v_pose, pose_frames, hw, attenti
     denom = w_f1 + w_rest
 
     if pose_frames > 0:
-        # query frame j against pose frame j-1, batched over the frames
+        # query frame first + j against pose frame j, batched over the frames
         n = pose_frames
-        pose_range = slice(hw, (n + 1) * hw)
+        pose_range = slice(first * hw, (first + n) * hw)
         out_pose, lse_pose = attention_lse(q[:, pose_range].reshape(B * n, hw, H, D),
                                            k_pose[:, :n * hw].reshape(B * n, hw, H, D),
                                            v_pose[:, :n * hw].reshape(B * n, hw, H, D), attention_mode)

@@ -503,7 +503,7 @@ class WanVideoSampler:
         # region Wan-Animate-2 inputs
         animate2_embeds = image_embeds.get("animate2", None)
         animate2_data = animate2_pose_latents = animate2_prefix_cond = None
-        animate2_prefix_count = 0
+        animate2_prefix_count = animate2_ref_frames = 0
         animate2_loop = False
         if animate2_embeds is not None:
             if transformer.in_dim != 36 or not hasattr(transformer, "img_emb"):
@@ -514,6 +514,8 @@ class WanVideoSampler:
             animate2_pose_latents = animate2_embeds.get("pose_latents", None)
             animate2_prefix_cond = animate2_embeds.get("prefix_cond", None) # extra reference frames after the reference slot
             animate2_prefix_count = animate2_prefix_cond.shape[1] if animate2_prefix_cond is not None else 0
+            # reference layout: the model places the extra references at the reference slot's time, without pose
+            animate2_ref_frames = animate2_prefix_count if not animate2_embeds.get("prefix_temporal", False) else 0
             animate2_cache = None
             if animate2_embeds.get("cache_device", "disabled") != "disabled":
                 animate2_cache = Animate2PoseCache(device if animate2_embeds["cache_device"] == "gpu" else torch.device("cpu"), animate2_embeds.get("cache_dtype", "default"))
@@ -529,6 +531,7 @@ class WanVideoSampler:
                 "start_percent": animate2_embeds.get("start_percent", 0.0),
                 "end_percent": animate2_embeds.get("end_percent", 1.0),
                 "cache": animate2_cache,
+                "ref_frames": animate2_ref_frames,
             }
             log.info(f"Wan-Animate-2: pose latents {tuple(animate2_pose_latents.shape) if animate2_pose_latents is not None else None}, "
                      f"pose cache: {animate2_embeds.get('cache_device')} {animate2_embeds.get('cache_dtype')}, log_scale: {animate2_data['log_scale']}")
@@ -1016,6 +1019,9 @@ class WanVideoSampler:
             rope_function = "comfy" # only works with this currently
         if scail2_embeds is not None and "comfy" not in rope_function:
             log.info("SCAIL-2 needs the comfy rope_function, switching to it")
+            rope_function = "comfy"
+        if animate2_ref_frames > 0 and "comfy" not in rope_function:
+            log.info("Wan-Animate-2 prefix_frames in the reference layout need the comfy rope_function, switching to it")
             rope_function = "comfy"
 
         freqs = None
@@ -2114,7 +2120,7 @@ class WanVideoSampler:
                             # pose frame i-1 drives generation frame i
                             partial_animate2_pose_latents = None
                             if animate2_pose_latents is not None:
-                                pose_indices = torch.tensor([i - 1 for i in c_window[1:]]).clamp(0, animate2_pose_latents.shape[1] - 1)
+                                pose_indices = torch.tensor([i - 1 - animate2_ref_frames for i in c_window[1 + animate2_ref_frames:]]).clamp(0, animate2_pose_latents.shape[1] - 1)
                                 partial_animate2_pose_latents = animate2_pose_latents[:, pose_indices]
                             if animate2_data is not None or wananim_context_prefix > 0:
                                 # windows with and without the prepended reference slot differ by a frame, padding would
@@ -2345,7 +2351,7 @@ class WanVideoSampler:
                             pose_latents_in = None
                             if pose_pixels is not None:
                                 pose_latents_in = vae.encode([pose_pixels[:, win_start:win_start + win_len].to(device, vae.dtype)], device, tiled=tiled_vae, pbar=False)[0].to(dtype)
-                                if animate2_prefix_count > 0: # the extra reference frames are driven by the window's first pose frame
+                                if animate2_prefix_count > 0 and animate2_ref_frames == 0: # temporal layout: the extra references are driven by the window's first pose frame
                                     pose_latents_in = torch.cat([pose_latents_in[:, :1].repeat(1, animate2_prefix_count, 1, 1), pose_latents_in], dim=1)
                             del video_pixels, video_latent, msk
                             vae.to(offload_device)
