@@ -532,6 +532,9 @@ class WanVideoSampler:
                 "end_percent": animate2_embeds.get("end_percent", 1.0),
                 "cache": animate2_cache,
                 "ref_frames": animate2_ref_frames,
+                "prefix_count": animate2_prefix_count,
+                "prefix_strength": animate2_embeds.get("prefix_strength", 1.0),
+                "prefix_time_offset": animate2_embeds.get("prefix_time_offset", 0),
             }
             log.info(f"Wan-Animate-2: pose latents {tuple(animate2_pose_latents.shape) if animate2_pose_latents is not None else None}, "
                      f"pose cache: {animate2_embeds.get('cache_device')} {animate2_embeds.get('cache_dtype')}, log_scale: {animate2_data['log_scale']}")

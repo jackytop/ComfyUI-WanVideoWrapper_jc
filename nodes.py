@@ -1495,6 +1495,11 @@ class WanVideoAnimate2Embeds:
                 "prefix_layout": (["reference", "temporal"], {"default": "reference", "tooltip": "reference: the extra references share the reference slot's time position and get no pose frame, "
                                   "the video frames keep their trained positions. temporal (WanAnimatePlus): they sit in the timeline right before the video, driven by the first pose frame, "
                                   "the video can then start from them (e.g. from a back view)"}),
+                "prefix_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01, "tooltip": "Scales how strongly the video attends to the extra references (their attention values), "
+                                    "lower it if they bleed into the video, e.g. a back view showing through the first frames"}),
+                "prefix_time_offset": ("INT", {"default": 0, "min": 0, "max": 1000, "step": 1, "tooltip": "reference layout only: places the extra references this many latent frames before the reference slot in time (RoPE). "
+                                       "At 0 they share the reference's position and the first video frames can blend them with the reference, "
+                                       "further away they act less like the frame the video starts from"}),
             }
         }
 
@@ -1506,7 +1511,8 @@ class WanVideoAnimate2Embeds:
 
     def process(self, vae, width, height, num_frames, frame_window_size, force_offload, pose_strength, reference_strength, log_scale, uncond_skip_block,
                 pose_start_percent, pose_end_percent, pose_cache, pose_cache_dtype, resize_mode, ref_image=None, pose_images=None, clip_embeds=None,
-                pose_clip_embeds=None, pose_text_embeds=None, continue_motion=None, tiled_vae=False, prefix_frames=None, prefix_layout="reference"):
+                pose_clip_embeds=None, pose_text_embeds=None, continue_motion=None, tiled_vae=False, prefix_frames=None, prefix_layout="reference",
+                prefix_strength=1.0, prefix_time_offset=0):
         from .utils import tensor_pingpong_pad
         if pose_start_percent > pose_end_percent:
             raise ValueError(f"pose_start_percent ({pose_start_percent}) must not be greater than pose_end_percent ({pose_end_percent})")
@@ -1573,6 +1579,8 @@ class WanVideoAnimate2Embeds:
             "looping": looping,
             "prefix_cond": prefix_cond,
             "prefix_temporal": temporal_prefix, # the pose is padded for the extra references
+            "prefix_strength": prefix_strength,
+            "prefix_time_offset": prefix_time_offset,
         }
 
         image_embeds = {

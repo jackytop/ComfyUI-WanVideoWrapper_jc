@@ -1187,6 +1187,9 @@ class WanAttentionBlock(nn.Module):
             ref_frames = animate2_attn.get("ref_frames", 0)
             if animate2_attn["ref_strength"] != 1.0:
                 v[:, :(1 + ref_frames) * hw] *= animate2_attn["ref_strength"] # frame 0 is the reference image slot, then the extra references
+            prefix_count = animate2_attn.get("prefix_count", 0)
+            if prefix_count > 0 and animate2_attn.get("prefix_strength", 1.0) != 1.0:
+                v[:, hw:(1 + prefix_count) * hw] *= animate2_attn["prefix_strength"] # the extra references, in either layout
             y = animate2_attention(q, k, v, animate2_attn["k"], animate2_attn["v"], animate2_attn["frames"], hw,
                                    attention_mode=attention_mode_override or self.self_attn.attention_mode,
                                    log_scale=animate2_attn["log_scale"], heads=self.num_heads, ref_frames=ref_frames)
@@ -2435,6 +2438,7 @@ class WanModel(torch.nn.Module):
         return {
             "x": x_pose, "e0": e0_pose, "freqs": freqs_pose, "context": context_pose, "clip_embed": clip_embed_pose,
             "cache": cache, "cached": cached, "frames": f, "hw": h * w, "ref_frames": ref_frames,
+            "prefix_count": animate2_input.get("prefix_count", 0), "prefix_strength": animate2_input.get("prefix_strength", 1.0),
             "pose_strength": animate2_input.get("pose_strength", 1.0),
             "ref_strength": animate2_input.get("reference_strength", 1.0),
             "log_scale": animate2_input.get("log_scale", 0.0),
@@ -2457,14 +2461,17 @@ class WanModel(torch.nn.Module):
         if animate2["pose_strength"] != 1.0:
             v = v * animate2["pose_strength"]
         return {"k": k, "v": v, "frames": animate2["frames"], "hw": animate2["hw"], "ref_frames": animate2["ref_frames"],
+                "prefix_count": animate2["prefix_count"], "prefix_strength": animate2["prefix_strength"],
                 "log_scale": animate2["log_scale"], "ref_strength": animate2["ref_strength"]}
 
-    def rope_encode_animate2_refs(self, f, h, w, ref_frames, ntk_alphas=[1, 1, 1], device=None):
-        """RoPE with the extra references at the reference slot's time (t 0), the video frames then at t 1, 2, ... as trained."""
-        key = (f, h, w, ref_frames, self.rope_embedder.k, tuple(ntk_alphas), str(device))
+    def rope_encode_animate2_refs(self, f, h, w, ref_frames, time_offset=0, ntk_alphas=[1, 1, 1], device=None):
+        """RoPE with the extra references at the reference slot's time (t 0), or time_offset frames before it,
+        the video frames then at t 1, 2, ... as trained."""
+        key = (f, h, w, ref_frames, time_offset, self.rope_embedder.k, tuple(ntk_alphas), str(device))
         if getattr(self, "animate2_refs_freqs_key", None) == key:
             return self.animate2_refs_freqs
         t = torch.clamp(torch.arange(f, device=device, dtype=torch.float32) - ref_frames, min=0)
+        t[1:1 + ref_frames] = -float(time_offset)
         grid = torch.meshgrid(t, torch.arange(h, device=device, dtype=torch.float32), torch.arange(w, device=device, dtype=torch.float32), indexing="ij")
         freqs = self.rope_embedder(torch.stack(grid, dim=-1).reshape(1, -1, 3), ntk_alphas).movedim(1, 2)
         self.animate2_refs_freqs_key, self.animate2_refs_freqs = key, freqs
@@ -2808,7 +2815,8 @@ class WanModel(torch.nn.Module):
         if animate2_input is not None and animate2_input.get("ref_frames", 0) > 0:
             if "comfy" not in self.rope_func:
                 raise ValueError("Wan-Animate-2 prefix_frames in the reference layout need the comfy rope_function")
-            freqs = self.rope_encode_animate2_refs(f, h, w, animate2_input["ref_frames"], ntk_alphas=ntk_alphas, device=x[0].device)
+            freqs = self.rope_encode_animate2_refs(f, h, w, animate2_input["ref_frames"], animate2_input.get("prefix_time_offset", 0),
+                                                   ntk_alphas=ntk_alphas, device=x[0].device)
 
         seq_lens = torch.tensor([u.size(1) for u in x], dtype=torch.int32)
         assert seq_lens.max() <= seq_len, f"max seq len {seq_lens.max()} exceeds provided seq_len {seq_len}"
