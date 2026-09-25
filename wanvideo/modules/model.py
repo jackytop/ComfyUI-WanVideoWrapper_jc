@@ -2202,14 +2202,19 @@ class WanModel(torch.nn.Module):
 
         return x
 
-    def wananimate_pose_embedding(self, x, pose_latents, strength=1.0):
+    def wananimate_pose_embedding(self, x, pose_latents, strength=1.0, num_anchor_latents=1):
+        # the pose drives the frames after the reference latents (1, or the main reference plus the extra ones)
         pose_latents = [self.pose_patch_embedding(u.unsqueeze(0).to(torch.float32)).to(x[0].dtype) for u in pose_latents]
         for x_, pose_latents_ in zip(x, pose_latents):
-            x_[:, :, 1:].add_(pose_latents_, alpha=strength)
+            if num_anchor_latents == 1:
+                x_[:, :, 1:].add_(pose_latents_, alpha=strength)
+            else:
+                pose_end = min(num_anchor_latents + pose_latents_.shape[2], x_.shape[2])
+                x_[:, :, num_anchor_latents:pose_end].add_(pose_latents_[:, :, :pose_end - num_anchor_latents], alpha=strength)
         return x
 
 
-    def wananimate_face_embedding(self, face_pixel_values):
+    def wananimate_face_embedding(self, face_pixel_values, num_anchor_latents=1):
         b,c,T,h,w = face_pixel_values.shape
         face_pixel_values = rearrange(face_pixel_values, "b c t h w -> (b t) c h w")
 
@@ -2228,7 +2233,7 @@ class WanModel(torch.nn.Module):
         self.face_encoder.to(self.offload_device)
 
         B, L, H, C = motion_vec.shape
-        pad_face = torch.zeros(B, 1, H, C, device=motion_vec.device, dtype=motion_vec.dtype)
+        pad_face = torch.zeros(B, num_anchor_latents, H, C, device=motion_vec.device, dtype=motion_vec.dtype)
         return torch.cat([pad_face, motion_vec], dim=1)
 
 
@@ -2485,7 +2490,7 @@ class WanModel(torch.nn.Module):
         s2v_audio_input=None, s2v_ref_latent=None, s2v_audio_scale=1.0,
         s2v_ref_motion=None, s2v_pose=None, s2v_motion_frames=[1, 0],
         humo_audio=None, humo_audio_scale=1.0,
-        wananim_pose_latents=None, wananim_face_pixel_values=None,
+        wananim_pose_latents=None, wananim_face_pixel_values=None, wananim_num_anchor_latents=1,
         wananim_pose_strength=1.0, wananim_face_strength=1.0,
         lynx_embeds=None,
         x_ovi=None, seq_len_ovi=None, ovi_negative_text_embeds=None,
@@ -2711,10 +2716,10 @@ class WanModel(torch.nn.Module):
         # WanAnimate
         motion_vec = None
         if wananim_face_pixel_values is not None:
-            motion_vec = self.wananimate_face_embedding(wananim_face_pixel_values).to(self.base_dtype)
+            motion_vec = self.wananimate_face_embedding(wananim_face_pixel_values, wananim_num_anchor_latents).to(self.base_dtype)
 
         if wananim_pose_latents is not None:
-            x = self.wananimate_pose_embedding(x, wananim_pose_latents, strength=wananim_pose_strength)
+            x = self.wananimate_pose_embedding(x, wananim_pose_latents, strength=wananim_pose_strength, num_anchor_latents=wananim_num_anchor_latents)
 
         # s2v pose embedding
         if s2v_pose is not None:
