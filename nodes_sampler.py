@@ -485,6 +485,10 @@ class WanVideoSampler:
         wananim_face_pixels = image_embeds.get("face_pixels", None)
         wananim_ref_masks = image_embeds.get("ref_masks", None)
         wananim_is_masked = image_embeds.get("is_masked", False)
+        # multiple references: latents in front of the pose driven frames, and the latents context windows after the first get in front
+        wananim_num_anchor_latents = image_embeds.get("wananim_num_anchor_latents", 1)
+        wananim_context_prefix = image_embeds.get("wananim_context_prefix_latents", 0)
+        wananim_prefix_ctx = image_embeds.get("wananim_prefix_ctx", None)
         if not wananimate_loop: # create zero face pixels if mask is provided without face pixels, as masking seems to require face input to work properly
             if wananim_face_pixels is None and wananim_is_masked:
                 if context_options is None:
@@ -498,7 +502,8 @@ class WanVideoSampler:
 
         # region Wan-Animate-2 inputs
         animate2_embeds = image_embeds.get("animate2", None)
-        animate2_data = animate2_pose_latents = None
+        animate2_data = animate2_pose_latents = animate2_prefix_cond = None
+        animate2_prefix_count = 0
         animate2_loop = False
         if animate2_embeds is not None:
             if transformer.in_dim != 36 or not hasattr(transformer, "img_emb"):
@@ -507,6 +512,8 @@ class WanVideoSampler:
             if animate2_loop and context_options is not None:
                 raise ValueError("context_options are not compatible or necessary with Wan-Animate-2 windowed generation, it already generates the video window after window")
             animate2_pose_latents = animate2_embeds.get("pose_latents", None)
+            animate2_prefix_cond = animate2_embeds.get("prefix_cond", None) # extra reference frames after the reference slot
+            animate2_prefix_count = animate2_prefix_cond.shape[1] if animate2_prefix_cond is not None else 0
             animate2_cache = None
             if animate2_embeds.get("cache_device", "disabled") != "disabled":
                 animate2_cache = Animate2PoseCache(device if animate2_embeds["cache_device"] == "gpu" else torch.device("cpu"), animate2_embeds.get("cache_dtype", "default"))
@@ -673,8 +680,8 @@ class WanVideoSampler:
 
                 if mocha_embeds is not None:
                     seq_len = (context_frames * 2 + 1 + mocha_num_refs) * (noise.shape[2] * noise.shape[3] // 4)
-                elif animate2_embeds is not None: # windows get the reference slot prepended
-                    seq_len = math.ceil((noise.shape[2] * noise.shape[3]) / 4 * (context_frames + 1))
+                elif animate2_embeds is not None: # windows get the reference slot (and extra references) prepended
+                    seq_len = math.ceil((noise.shape[2] * noise.shape[3]) / 4 * (context_frames + 1 + animate2_prefix_count))
                 else:
                     seq_len = math.ceil((noise.shape[2] * noise.shape[3]) / 4 * context_frames)
                 log.info(f"context window seq len: {seq_len}")
@@ -1550,6 +1557,7 @@ class WanVideoSampler:
                     "wananim_face_pixel_values": wananim_face_pixels.to(device, torch.float32) if wananim_face_pixels is not None else None, # WanAnimate face images
                     "wananim_pose_strength": wananim_pose_strength,
                     "wananim_face_strength": wananim_face_strength,
+                    "wananim_num_anchor_latents": wananim_num_anchor_latents,
                     "lynx_embeds": lynx_embeds, # Lynx face and reference embeddings
                     "x_ovi": [latent_model_input_ovi.to(z)] if latent_model_input_ovi is not None else None, # Audio latent model input for Ovi
                     "seq_len_ovi": seq_len_ovi, # Audio latent model sequence length for Ovi
@@ -1960,10 +1968,13 @@ class WanVideoSampler:
 
                             # Wan-Animate-2: latent frame 0 is the reference image slot, every window needs it in front
                             animate2_prepend = animate2_data is not None and c[0] != 0
-                            c_window = [0] + list(c) if animate2_prepend else c
+                            c_window = sorted(set(range(1 + animate2_prefix_count)) | set(c)) if animate2_prepend else c
+                            # WanAnimate with prefix_frames: the reference latents go in front of every window
+                            if wananim_context_prefix > 0 and c[0] != 0:
+                                c_window = sorted(set(range(wananim_context_prefix)) | set(c))
 
                             partial_img_emb = partial_control_latents = None
-                            if animate2_data is not None and image_cond is not None:
+                            if (animate2_data is not None or wananim_context_prefix > 0) and image_cond is not None:
                                 partial_img_emb = image_cond[:, c_window].to(device)
                             elif image_cond is not None:
                                 partial_img_emb = image_cond[:, c].to(device)
@@ -2070,13 +2081,21 @@ class WanVideoSampler:
                                 partial_add_cond = add_cond[:, :, c].to(device, dtype)
 
                             partial_wananim_face_pixels = partial_wananim_pose_latents = None
-                            if wananim_face_pixels is not None and partial_wananim_face_pixels is None:
+                            if wananim_context_prefix > 0: # frame i of the window is driven by pose i - anchors, 4 face frames each
+                                video_indices = [i - wananim_num_anchor_latents for i in c_window if i >= wananim_num_anchor_latents]
+                                if wananim_pose_latents is not None:
+                                    pose_indices = torch.tensor(video_indices).clamp(0, wananim_pose_latents.shape[2] - 1)
+                                    partial_wananim_pose_latents = wananim_pose_latents[:, :, pose_indices].to(device, dtype)
+                                if wananim_face_pixels is not None:
+                                    face_indices = torch.tensor([4 * v + k for v in video_indices for k in range(4)]).clamp(0, wananim_face_pixels.shape[2] - 1)
+                                    partial_wananim_face_pixels = wananim_face_pixels[:, :, face_indices].to(device, dtype)
+                            elif wananim_face_pixels is not None and partial_wananim_face_pixels is None:
                                 start = c[0] * 4
                                 end = c[-1] * 4
                                 center_indices = torch.arange(start, end, 1)
                                 center_indices = torch.clamp(center_indices, min=0, max=wananim_face_pixels.shape[2] - 1)
                                 partial_wananim_face_pixels = wananim_face_pixels[:, :, center_indices].to(device, dtype)
-                            if wananim_pose_latents is not None:
+                            if wananim_pose_latents is not None and wananim_context_prefix == 0:
                                 start = c[0]
                                 end = c[-1]
                                 center_indices = torch.arange(start, end, 1)
@@ -2097,7 +2116,7 @@ class WanVideoSampler:
                             if animate2_pose_latents is not None:
                                 pose_indices = torch.tensor([i - 1 for i in c_window[1:]]).clamp(0, animate2_pose_latents.shape[1] - 1)
                                 partial_animate2_pose_latents = animate2_pose_latents[:, pose_indices]
-                            if animate2_data is not None:
+                            if animate2_data is not None or wananim_context_prefix > 0:
                                 # windows with and without the prepended reference slot differ by a frame, padding would
                                 # leave the sequence longer than its RoPE freqs, which the fused rope kernels reject
                                 seq_len = math.ceil((noise.shape[2] * noise.shape[3]) / 4 * len(c_window))
@@ -2126,8 +2145,8 @@ class WanVideoSampler:
 
                             if mocha_embeds is not None:
                                 noise_pred_context = noise_pred_context[:, :orig_model_input_frames]
-                            if animate2_prepend:
-                                noise_pred_context = noise_pred_context[:, 1:]
+                            if len(c_window) != len(c):
+                                noise_pred_context = noise_pred_context[:, [c_window.index(i) for i in c]]
 
                             window_mask = create_window_mask(noise_pred_context, c, noise.shape[1], context_overlap, looped=is_looped, window_type=context_options["fuse_method"])
                             noise_pred[:, c] += noise_pred_context * window_mask
@@ -2321,16 +2340,20 @@ class WanVideoSampler:
                                 video_pixels[:, :1] = prev_frame.to(device, vae.dtype)
                                 msk[:, 0] = 1
                             video_latent = vae.encode([video_pixels], device, tiled=tiled_vae, pbar=False)[0].to(dtype)
-                            image_cond_in = torch.cat([ref_cond, torch.cat([msk, video_latent])], dim=1)
+                            front_cond = ref_cond if animate2_prefix_cond is None else torch.cat([ref_cond, animate2_prefix_cond.to(ref_cond)], dim=1)
+                            image_cond_in = torch.cat([front_cond, torch.cat([msk, video_latent])], dim=1)
                             pose_latents_in = None
                             if pose_pixels is not None:
                                 pose_latents_in = vae.encode([pose_pixels[:, win_start:win_start + win_len].to(device, vae.dtype)], device, tiled=tiled_vae, pbar=False)[0].to(dtype)
+                                if animate2_prefix_count > 0: # the extra reference frames are driven by the window's first pose frame
+                                    pose_latents_in = torch.cat([pose_latents_in[:, :1].repeat(1, animate2_prefix_count, 1, 1), pose_latents_in], dim=1)
                             del video_pixels, video_latent, msk
                             vae.to(offload_device)
                             mm.soft_empty_cache()
 
-                            noise = torch.randn(16, 1 + lat_video, lat_h, lat_w, dtype=torch.float32, device=torch.device("cpu"), generator=seed_g).to(device)
-                            seq_len = math.ceil(lat_h * lat_w / 4 * (1 + lat_video))
+                            front_latents = 1 + animate2_prefix_count
+                            noise = torch.randn(16, front_latents + lat_video, lat_h, lat_w, dtype=torch.float32, device=torch.device("cpu"), generator=seed_g).to(device)
+                            seq_len = math.ceil(lat_h * lat_w / 4 * (front_latents + lat_video))
                             if isinstance(scheduler, dict):
                                 sample_scheduler = copy.deepcopy(scheduler["sample_scheduler"])
                                 timesteps = scheduler["timesteps"]
@@ -2351,7 +2374,7 @@ class WanVideoSampler:
                                     cache_state=self.cache_state, image_cond=image_cond_in, clip_fea=clip_fea, animate2_pose_latents=pose_latents_in)
                                 if callback is not None:
                                     callback_latent = (latent - noise_pred.to(latent) * timestep.to(latent) / 1000).detach().permute(1, 0, 2, 3)
-                                    callback(step_iteration_count, callback_latent[1:], None, len(windows) * len(timesteps))
+                                    callback(step_iteration_count, callback_latent[front_latents:], None, len(windows) * len(timesteps))
                                     del callback_latent
                                 step_iteration_count += 1
                                 sampling_pbar.update(1)
@@ -2360,7 +2383,7 @@ class WanVideoSampler:
                             sampling_pbar.close()
 
                             vae.to(device)
-                            videos = vae.decode(latent[:, 1:].unsqueeze(0).to(device, vae.dtype), device=device, tiled=tiled_vae, pbar=False)[0].cpu().float()
+                            videos = vae.decode(latent[:, front_latents:].unsqueeze(0).to(device, vae.dtype), device=device, tiled=tiled_vae, pbar=False)[0].cpu().float()
                             vae.to(offload_device)
                             del latent, noise, image_cond_in, pose_latents_in
                             if window_idx > 0: # the continuation frame is already in the output
@@ -2547,7 +2570,10 @@ class WanVideoSampler:
 
                             self.cache_state = [None, None]
 
-                            noise = torch.randn(16, latent_window_size + 1, lat_h, lat_w, dtype=torch.float32, device=torch.device("cpu"), generator=seed_g).to(device)
+                            # latents in front of the window: the reference(s), plus the canvas reference frames after the first window
+                            window_prefix_ctx = wananim_prefix_ctx if wananim_prefix_ctx is not None and start != 0 else None
+                            front_latents = (ref_latent.shape[1] if ref_latent is not None else 1) + (window_prefix_ctx.shape[1] if window_prefix_ctx is not None else 0)
+                            noise = torch.randn(16, latent_window_size + front_latents, lat_h, lat_w, dtype=torch.float32, device=torch.device("cpu"), generator=seed_g).to(device)
                             seq_len = math.ceil((noise.shape[2] * noise.shape[3]) / 4 * noise.shape[1])
 
                             if current_ref_images is not None or bg_images is not None or ref_latent is not None:
@@ -2580,7 +2606,8 @@ class WanVideoSampler:
 
                                 if ref_latent is not None:
                                     temporal_ref_latents = torch.cat([msk, temporal_ref_latents], dim=0) # 4+C T H W
-                                    image_cond_in = torch.cat([ref_latent.to(device), temporal_ref_latents], dim=1) # 4+C T+trefs H W
+                                    front_cond = ref_latent if window_prefix_ctx is None else torch.cat([ref_latent, window_prefix_ctx], dim=1)
+                                    image_cond_in = torch.cat([front_cond.to(device), temporal_ref_latents], dim=1) # 4+C T+trefs H W
                                     del temporal_ref_latents, msk, bg_image_slice
                                 else:
                                     image_cond_in = torch.cat([torch.tile(torch.zeros_like(noise[:1]), [4, 1, 1, 1]), torch.zeros_like(noise)], dim=0).to(device)
@@ -2599,6 +2626,12 @@ class WanVideoSampler:
                                 face_images_in = torch.zeros(1, 3, frame_window_size, 512, 512, device=device, dtype=torch.float32)
                             elif wananim_face_pixels is not None:
                                 face_images_in = face_images[:, :, start:end].to(device, torch.float32) if face_images is not None else None
+                            if window_prefix_ctx is not None: # the canvas reference frames take the pose and face of the window start
+                                prefix_t = window_prefix_ctx.shape[1]
+                                if pose_input_slice is not None:
+                                    pose_input_slice = torch.cat([pose_input_slice[:, :, :1].repeat(1, 1, prefix_t, 1, 1), pose_input_slice], dim=2)
+                                if face_images_in is not None:
+                                    face_images_in = torch.cat([face_images_in[:, :, :1].repeat(1, 1, prefix_t * 4, 1, 1), face_images_in], dim=2)
 
                             if samples is not None:
                                 input_samples = samples["samples"]
@@ -2719,7 +2752,7 @@ class WanVideoSampler:
                                 offloaded = True
 
                             vae.to(device)
-                            videos = vae.decode(latent[:, 1:].unsqueeze(0).to(device, vae.dtype), device=device, tiled=tiled_vae, pbar=False)[0].cpu()
+                            videos = vae.decode(latent[:, front_latents:].unsqueeze(0).to(device, vae.dtype), device=device, tiled=tiled_vae, pbar=False)[0].cpu()
                             del latent
 
                             if start != 0 or current_ref_images is not None:
@@ -2764,6 +2797,9 @@ class WanVideoSampler:
 
                         if not output_path:
                             gen_video_samples = torch.cat(gen_video_list, dim=1)
+                            output_frame_trim = image_embeds.get("output_frame_trim", None)
+                            if output_frame_trim is not None: # frames added in front for the canvas references
+                                gen_video_samples = gen_video_samples[:, output_frame_trim[0]:output_frame_trim[0] + output_frame_trim[1]]
                         else:
                             gen_video_samples = torch.zeros(3, 1, 64, 64) # dummy output
 
@@ -2930,6 +2966,8 @@ class WanVideoSampler:
             "cache_states": cache_states,
             "latent_ovi_audio": latent_ovi.unsqueeze(0).transpose(1, 2).cpu() if latent_ovi is not None else None,
             "flashvsr_LQ_images": LQ_images,
+            "ref_trim": image_embeds.get("ref_trim", None),
+            "output_frame_trim": image_embeds.get("output_frame_trim", None),
         },{
             "samples": callback_latent.unsqueeze(0).cpu() if callback is not None else None,
         })

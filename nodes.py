@@ -1209,6 +1209,12 @@ class WanVideoAnimateEmbeds:
                 "mask": ("MASK", {"tooltip": "mask"}),
                 "start_ref_image": ("IMAGE", {"tooltip": "start ref image"}),
                 "tiled_vae": ("BOOLEAN", {"default": False, "tooltip": "Use tiled VAE encoding for reduced memory use"}),
+                "prefix_frames": ("IMAGE", {"tooltip": "Up to 5 additional reference images of the character (other views, close-ups, outfit details), used together with ref_images. "
+                                            "The model isn't trained on multiple references, this is an experimental, training free extension"}),
+                "prefix_mode": (["single_frame", "canvas"], {"default": "single_frame", "tooltip": "single_frame: each extra reference is encoded as its own latent frame in front of the main reference, like additional reference slots. "
+                                "canvas: the extra references are placed as known frames at the start of an expanded video (image 0 once, the others 4 frames each), "
+                                "followed by a transition into the motion, and that part is trimmed from the output"}),
+                "canvas_layout": (["transition_37", "outfit_45"], {"default": "transition_37", "tooltip": "canvas mode only, frames added in front of the video: 37 = 17 reference + 20 transition, 45 = 17 reference + 8 reserve + 20 transition"}),
             }
         }
 
@@ -1218,18 +1224,55 @@ class WanVideoAnimateEmbeds:
     CATEGORY = "WanVideoWrapper"
 
     def process(self, vae, width, height, num_frames, force_offload, frame_window_size, colormatch, pose_strength, face_strength,
-                ref_images=None, pose_images=None, face_images=None, clip_embeds=None, tiled_vae=False, bg_images=None, mask=None, start_ref_image=None):
-        
+                ref_images=None, pose_images=None, face_images=None, clip_embeds=None, tiled_vae=False, bg_images=None, mask=None, start_ref_image=None,
+                prefix_frames=None, prefix_mode="single_frame", canvas_layout="transition_37"):
+
         W = (width // 16) * 16
         H = (height // 16) * 16
 
         lat_h = H // vae.upsampling_factor
         lat_w = W // vae.upsampling_factor
 
-        num_refs = ref_images.shape[0] if ref_images is not None else 0
-        num_frames = ((num_frames - 1) // 4) * 4 + 1
+        # multiple references (after WanAnimatePlus' prefix_frames): extra reference latents in front of the main one, or known frames on an expanded canvas
+        prefix_count = 0
+        if prefix_frames is not None:
+            if ref_images is None:
+                raise ValueError("prefix_frames need ref_images, the main reference")
+            if prefix_frames.shape[0] > 5:
+                log.warning(f"WanAnimate: {prefix_frames.shape[0]} prefix_frames, using the first 5")
+            prefix_count = min(prefix_frames.shape[0], 5)
+            prefix_frames = prefix_frames[:prefix_count, :, :, :3]
+            if ref_images.shape[0] > 1:
+                log.warning("WanAnimate: with prefix_frames only the first ref_images image is the main reference")
+                ref_images = ref_images[:1]
+        single_prefix = prefix_count > 0 and prefix_mode == "single_frame"
+        canvas_prefix = prefix_count > 0 and prefix_mode == "canvas"
 
-        looping = num_frames > frame_window_size or start_ref_image is not None
+        num_refs = prefix_count + 1 if single_prefix else (ref_images.shape[0] if ref_images is not None else 0)
+        num_frames = ((num_frames - 1) // 4) * 4 + 1
+        requested_frames = num_frames
+
+        canvas_extra = prefix_px = 0
+        if canvas_prefix:
+            canvas_extra = 37 if canvas_layout == "transition_37" else 45
+            num_frames = ((num_frames + canvas_extra - 1 + 3) // 4) * 4 + 1
+            # the controls of the added frames run backwards into the first frame, leading into the motion
+            def lead_in(frames):
+                indices = torch.clamp(torch.arange(canvas_extra, device=frames.device) * 2, max=frames.shape[0] - 1)
+                frames = torch.cat([frames.index_select(0, indices).flip(0), frames], dim=0)
+                if frames.shape[0] < num_frames: # the canvas is rounded up to 4n+1 frames
+                    frames = torch.cat([frames, frames[-1:].repeat(num_frames - frames.shape[0], *[1] * (frames.ndim - 1))], dim=0)
+                return frames
+            pose_images = lead_in(pose_images) if pose_images is not None else None
+            face_images = lead_in(face_images) if face_images is not None else None
+            bg_images = lead_in(bg_images) if bg_images is not None else None
+            mask = lead_in(mask) if mask is not None else None
+            prefix_pixels = torch.cat([prefix_frames[:1]] + [prefix_frames[i:i + 1].repeat(4, 1, 1, 1) for i in range(1, prefix_count)])
+            prefix_px = prefix_pixels.shape[0]
+            prefix_pixels = common_upscale(prefix_pixels.movedim(-1, 1), W, H, "lanczos", "disabled").movedim(0, 1) * 2 - 1 # C, T, H, W
+            log.info(f"WanAnimate: {prefix_count} prefix frames on a {canvas_extra} frame canvas in front of the video ({prefix_px} known frames)")
+
+        looping = requested_frames > frame_window_size or start_ref_image is not None
 
         if num_frames < frame_window_size:
             frame_window_size = num_frames
@@ -1238,7 +1281,9 @@ class WanVideoAnimateEmbeds:
         latent_window_size = ((frame_window_size - 1) // 4)
 
         if not looping:
-            num_frames = num_frames + num_refs * 4
+            num_frames = num_frames + (4 if single_prefix else num_refs * 4)
+            if prefix_count > 0: # the pose has to cover every frame after the references
+                latent_window_size = target_shape[1] - num_refs
         else:
             latent_window_size = latent_window_size + 1
 
@@ -1275,9 +1320,18 @@ class WanVideoAnimateEmbeds:
                 resized_bg_images = bg_images.permute(3, 0, 1, 2) # C, T, H, W
             resized_bg_images = (resized_bg_images[:3] * 2 - 1)
 
+        no_bg_images = bg_images is None
+        if canvas_prefix and looping and bg_images is None: # the windows take the canvas from the background frames
+            resized_bg_images = torch.zeros(3, num_frames, H, W, dtype=vae.dtype)
+            bg_images = resized_bg_images
+        if canvas_prefix and bg_images is not None:
+            resized_bg_images[:, :prefix_px] = prefix_pixels.to(resized_bg_images)
+
         if not looping:
             if bg_images is None:
-                resized_bg_images = torch.zeros(3, num_frames - num_refs, H, W, device=device, dtype=vae.dtype)
+                resized_bg_images = torch.zeros(3, num_frames - (1 if single_prefix else num_refs), H, W, device=device, dtype=vae.dtype)
+                if canvas_prefix:
+                    resized_bg_images[:, :prefix_px] = prefix_pixels.to(resized_bg_images)
             bg_latents = vae.encode([resized_bg_images.to(device, vae.dtype)], device,tiled=tiled_vae)[0].to(offload_device)
             del resized_bg_images
         elif bg_images is not None:
@@ -1291,9 +1345,19 @@ class WanVideoAnimateEmbeds:
             resized_ref_images = resized_ref_images[:3] * 2 - 1
 
             ref_latent = vae.encode([resized_ref_images.to(device, vae.dtype)], device,tiled=tiled_vae)[0]
-            msk = torch.zeros(4, 1, lat_h, lat_w, device=device, dtype=vae.dtype)
+            if single_prefix: # [extra references..., main reference], each its own latent frame
+                prefix_resized = common_upscale(prefix_frames.movedim(-1, 1), W, H, "lanczos", "disabled").movedim(0, 1) * 2 - 1
+                prefix_latents = [vae.encode([prefix_resized[:, i:i + 1].to(device, vae.dtype)], device, tiled=tiled_vae)[0] for i in range(prefix_count)]
+                ref_latent = torch.cat(prefix_latents + [ref_latent], dim=1)
+                log.info(f"WanAnimate: {prefix_count} prefix frames + the main reference as {ref_latent.shape[1]} reference latents")
+            msk = torch.zeros(4, ref_latent.shape[1], lat_h, lat_w, device=device, dtype=vae.dtype)
             msk[:, :num_refs] = 1
-            ref_latent_masked = torch.cat([msk, ref_latent], dim=0).to(offload_device) # 4+C 1 H W
+            ref_latent_masked = torch.cat([msk, ref_latent], dim=0).to(offload_device) # 4+C refs H W
+
+            prefix_ctx = None
+            if canvas_prefix and looping: # later windows get the reference frames in front, after the main reference
+                prefix_latent = vae.encode([prefix_pixels.to(device, vae.dtype)], device, tiled=tiled_vae)[0]
+                prefix_ctx = torch.cat([torch.ones_like(prefix_latent[:4]), prefix_latent]).to(offload_device)
 
             if mask is None:
                 bg_mask = torch.zeros(1, num_frames, lat_h, lat_w, device=offload_device, dtype=vae.dtype)
@@ -1304,8 +1368,10 @@ class WanVideoAnimateEmbeds:
                 bg_mask = common_upscale(bg_mask.unsqueeze(1), lat_w, lat_h, "nearest", "disabled").squeeze(1)
                 bg_mask = bg_mask.unsqueeze(-1).permute(3, 0, 1, 2).to(offload_device, vae.dtype) # C, T, H, W
             
-            if bg_images is None and looping:
+            if no_bg_images and looping:
                 bg_mask[:, :num_refs] = 1
+            if canvas_prefix: # the reference frames are known
+                bg_mask[:, :prefix_px] = 1
             bg_mask_mask_repeated = torch.repeat_interleave(bg_mask[:, 0:1], repeats=4, dim=1) # T, C, H, W
             bg_mask = torch.cat([bg_mask_mask_repeated, bg_mask[:, 1:]], dim=1)
             bg_mask = bg_mask.view(1, bg_mask.shape[1] // 4, 4, lat_h, lat_w) # 1, T, C, H, W
@@ -1348,7 +1414,7 @@ class WanVideoAnimateEmbeds:
             "pose_latents": pose_latents,
             "pose_images": resized_pose_images if pose_images is not None and looping else None,
             "bg_images": resized_bg_images if bg_images is not None and looping else None,
-            "ref_masks": bg_mask if mask is not None and looping else None,
+            "ref_masks": bg_mask if (mask is not None or canvas_prefix) and looping else None,
             "is_masked": mask is not None,
             "ref_latent": ref_latent,
             "ref_image": resized_ref_images if ref_images is not None else None,
@@ -1365,6 +1431,15 @@ class WanVideoAnimateEmbeds:
             "pose_strength": pose_strength,
             "face_strength": face_strength,
         }
+        if prefix_count > 0:
+            image_embeds.update({
+                "wananim_num_anchor_latents": num_refs if single_prefix else 1, # latents in front of the pose driven frames
+                # context windows after the first get these latents in front: the references, or the main one and the canvas reference frames
+                "wananim_context_prefix_latents": num_refs if single_prefix else 1 + (prefix_px - 1) // 4 + 1,
+                "wananim_prefix_ctx": prefix_ctx if canvas_prefix and looping else None,
+                "ref_trim": (0, num_refs - 1) if single_prefix and not looping else None, # the decoder drops the main reference, these go with it
+                "output_frame_trim": (canvas_extra, requested_frames) if canvas_prefix else None,
+            })
 
         return (image_embeds,)
 
@@ -1414,6 +1489,9 @@ class WanVideoAnimate2Embeds:
                 "pose_text_embeds": ("WANVIDEOTEXTEMBEDS", {"tooltip": "Prompt for the pose branch, describing the driving video rather than the character. Upstream default is '人物动作的参考视频'. Defaults to the positive prompt"}),
                 "continue_motion": ("IMAGE", {"tooltip": "Previous video to continue from, its last frame is used as the first frame. The first output frame then repeats it"}),
                 "tiled_vae": ("BOOLEAN", {"default": False, "tooltip": "Use tiled VAE encoding for reduced memory use"}),
+                "prefix_frames": ("IMAGE", {"tooltip": "Up to 5 additional reference images of the character (other views, close-ups, outfit details). "
+                                            "Each becomes a known latent frame right after the reference slot, driven by the first pose frame, and is dropped from the output. "
+                                            "The model isn't trained on multiple references, this is an experimental, training free extension (after WanAnimatePlus)"}),
             }
         }
 
@@ -1425,7 +1503,7 @@ class WanVideoAnimate2Embeds:
 
     def process(self, vae, width, height, num_frames, frame_window_size, force_offload, pose_strength, reference_strength, log_scale, uncond_skip_block,
                 pose_start_percent, pose_end_percent, pose_cache, pose_cache_dtype, resize_mode, ref_image=None, pose_images=None, clip_embeds=None,
-                pose_clip_embeds=None, pose_text_embeds=None, continue_motion=None, tiled_vae=False):
+                pose_clip_embeds=None, pose_text_embeds=None, continue_motion=None, tiled_vae=False, prefix_frames=None):
         from .utils import tensor_pingpong_pad
         if pose_start_percent > pose_end_percent:
             raise ValueError(f"pose_start_percent ({pose_start_percent}) must not be greater than pose_end_percent ({pose_end_percent})")
@@ -1450,6 +1528,18 @@ class WanVideoAnimate2Embeds:
             ref_pixels = resize_frames(ref_image[:1], W, H, resize_mode)
         ref_latent = vae.encode([ref_pixels.to(device, vae.dtype)], device, tiled=tiled_vae)[0].to(offload_device)
         ref_cond = torch.cat([torch.ones(4, 1, lat_h, lat_w, dtype=ref_latent.dtype), ref_latent]) # mask | latent
+
+        # extra references: known latent frames after the reference slot, each encoded on its own
+        prefix_count, prefix_cond = 0, None
+        if prefix_frames is not None:
+            if prefix_frames.shape[0] > 5:
+                log.warning(f"Wan-Animate-2: {prefix_frames.shape[0]} prefix_frames, using the first 5")
+            prefix_count = min(prefix_frames.shape[0], 5)
+            prefix_pixels = resize_frames(prefix_frames[:prefix_count], W, H, resize_mode)
+            prefix_latent = torch.cat([vae.encode([prefix_pixels[:, i:i + 1].to(device, vae.dtype)], device, tiled=tiled_vae)[0].to(offload_device)
+                                       for i in range(prefix_count)], dim=1)
+            prefix_cond = torch.cat([torch.ones_like(prefix_latent[:4]), prefix_latent])
+            log.info(f"Wan-Animate-2: {prefix_count} extra reference frames after the reference slot")
 
         continue_frame = None
         if continue_motion is not None:
@@ -1477,6 +1567,7 @@ class WanVideoAnimate2Embeds:
             "cache_device": pose_cache,
             "cache_dtype": pose_cache_dtype,
             "looping": looping,
+            "prefix_cond": prefix_cond,
         }
 
         image_embeds = {
@@ -1501,12 +1592,16 @@ class WanVideoAnimate2Embeds:
             pose_latents = None
             if pose_pixels is not None:
                 pose_latents = vae.encode([pose_pixels.to(device, vae.dtype)], device, tiled=tiled_vae)[0].to(offload_device)
+                if prefix_count > 0: # the extra reference frames are driven by the first pose frame
+                    pose_latents = torch.cat([pose_latents[:, :1].repeat(1, prefix_count, 1, 1), pose_latents], dim=1)
             animate2["pose_latents"] = pose_latents
+            front_cond = ref_cond if prefix_cond is None else torch.cat([ref_cond, prefix_cond], dim=1)
             image_embeds.update({
-                "image_embeds": torch.cat([ref_latent, video_latent], dim=1),
-                "mask": torch.cat([ref_cond[:4], mask.to(ref_cond.dtype)], dim=1),
-                "num_frames": num_frames + 4, # latent frames = the reference slot + the video
-                "max_seq_len": math.ceil(lat_h * lat_w / 4 * (window_latents + 1)),
+                "image_embeds": torch.cat([front_cond[4:], video_latent], dim=1),
+                "mask": torch.cat([front_cond[:4], mask.to(ref_cond.dtype)], dim=1),
+                "num_frames": num_frames + 4 * (1 + prefix_count), # latent frames = the reference slot + the extra references + the video
+                "max_seq_len": math.ceil(lat_h * lat_w / 4 * (window_latents + 1 + prefix_count)),
+                "ref_trim": (1, prefix_count) if prefix_count > 0 else None, # the decoder drops the reference slot, these go with it
             })
         else:
             # windows are encoded by the sampler as it goes
@@ -1521,7 +1616,7 @@ class WanVideoAnimate2Embeds:
             image_embeds.update({
                 "target_shape": (16, window_latents + 1, lat_h, lat_w),
                 "num_frames": num_frames,
-                "max_seq_len": math.ceil(lat_h * lat_w / 4 * (window_latents + 1)),
+                "max_seq_len": math.ceil(lat_h * lat_w / 4 * (window_latents + 1 + prefix_count)),
             })
 
         if force_offload:
@@ -2298,15 +2393,21 @@ class WanVideoDecode:
 
         mm.soft_empty_cache()
 
+        ref_trim = samples.get("ref_trim", None) # extra reference latents next to the main one
+        if ref_trim is not None and ref_trim[1] > 0:
+            latents = torch.cat([latents[:, :, :ref_trim[0]], latents[:, :, ref_trim[0] + ref_trim[1]:]], dim=2)
         if has_ref:
             latents = latents[:, :, 1:]
         if drop_last:
             latents = latents[:, :, :-1]
+        output_frame_trim = samples.get("output_frame_trim", None) # (frames added in front, frames to keep)
 
         if type(vae).__name__ == "TAEHV":
             images = vae.decode_video(latents.permute(0, 2, 1, 3, 4), cond=flashvsr_LQ_images.to(vae.dtype) if flashvsr_LQ_images is not None else None)[0].permute(1, 0, 2, 3)
             images = torch.clamp(images, 0.0, 1.0)
             images = images.permute(1, 2, 3, 0).cpu().float()
+            if output_frame_trim is not None:
+                images = images[output_frame_trim[0]:output_frame_trim[0] + output_frame_trim[1]]
             return (images,)
         else:
             images = vae.decode(latents, device=device, end_=(end_image is not None), tiled=enable_vae_tiling, tile_size=(tile_x//8, tile_y//8), tile_stride=(tile_stride_x//8, tile_stride_y//8))[0]
@@ -2330,6 +2431,8 @@ class WanVideoDecode:
 
         if end_image is not None: 
             images = images[:, 0:-1]
+        if output_frame_trim is not None:
+            images = images[:, output_frame_trim[0]:output_frame_trim[0] + output_frame_trim[1]]
 
 
         vae.to(offload_device)
