@@ -668,6 +668,7 @@ class WanVideoSampler:
         # Context windows
         is_looped = False
         context_reference_latent = None
+        scail2_anchor_frames, scail2_anchor_timeline = 0, False
         if context_options is not None:
             if context_options["context_frames"] <= num_frames:
                 context_schedule = context_options["context_schedule"]
@@ -675,6 +676,14 @@ class WanVideoSampler:
                 context_stride = context_options["context_stride"] // 4
                 context_overlap = context_options["context_overlap"] // 4
                 context_reference_latent = context_options.get("reference_latent", None)
+                # SCAIL-2: the video's first latent frames go into every window as a shared anchor
+                if context_options.get("anchor_frames", 0) > 0:
+                    if scail2_embeds is None:
+                        log.warning("Context anchor_frames are only implemented for SCAIL-2, ignoring them")
+                    else:
+                        scail2_anchor_frames = min(context_options["anchor_frames"], context_frames - 1)
+                        scail2_anchor_timeline = context_options.get("anchor_rope", "adjacent") == "timeline"
+                        log.info(f"SCAIL-2 context windows: {scail2_anchor_frames} anchor latent frame(s) in every window, {context_options.get('anchor_rope', 'adjacent')} RoPE")
 
                 # Get total number of prompts
                 num_prompts = len(text_embeds["prompt_embeds"])
@@ -1492,6 +1501,8 @@ class WanVideoSampler:
                     if context_window is not None and scail2_data.get("pose_latent", None) is not None:
                         scail2_in = {**scail2_data, "pose_latent": scail2_data["pose_latent"][:, context_window],
                                      "driving_mask": scail2_data["driving_mask"][:, context_window]}
+                        if scail2_anchor_timeline and len(context_window) > 1 and context_window[-1] - context_window[0] != len(context_window) - 1:
+                            scail2_in["video_t"] = tuple(int(i) - int(context_window[0]) for i in context_window) # anchors at their real distance
                     seq_len = math.ceil((z.shape[2] * z.shape[3]) / 4 * z.shape[1]) # the model adds the references and pose, RoPE covers no padding
 
                 if wanmove_embeds is not None and context_window is not None:
@@ -1981,6 +1992,9 @@ class WanVideoSampler:
                             # WanAnimate with prefix_frames: the reference latents go in front of every window
                             if wananim_context_prefix > 0 and c[0] != 0:
                                 c_window = sorted(set(range(wananim_context_prefix)) | set(c))
+                            # SCAIL-2 anchors: the video's first latent frames in front of every window
+                            if scail2_anchor_frames > 0 and c[0] != 0:
+                                c_window = sorted(set(range(scail2_anchor_frames)) | set(c))
 
                             partial_img_emb = partial_control_latents = None
                             if (animate2_data is not None or wananim_context_prefix > 0) and image_cond is not None:
@@ -2143,7 +2157,7 @@ class WanVideoSampler:
                                 cfg[idx], positive,
                                 text_embeds["negative_prompt_embeds"],
                                 partial_timestep, idx, partial_img_emb, clip_fea, partial_control_latents, partial_vace_context, partial_unianim_data,partial_audio_proj,
-                                partial_control_camera_latents, partial_add_cond, current_teacache, context_window=c, fantasy_portrait_input=partial_fantasy_portrait_input,
+                                partial_control_camera_latents, partial_add_cond, current_teacache, context_window=c_window if scail2_anchor_frames > 0 else c, fantasy_portrait_input=partial_fantasy_portrait_input,
                                 mtv_motion_tokens=partial_mtv_motion_tokens, s2v_audio_input=partial_s2v_audio_input, s2v_motion_frames=[1, 0], s2v_pose=partial_s2v_pose,
                                 humo_image_cond=humo_image_cond, humo_image_cond_neg=humo_image_cond_neg, humo_audio=humo_audio, humo_audio_neg=humo_audio_neg,
                                 wananim_face_pixels=partial_wananim_face_pixels, wananim_pose_latents=partial_wananim_pose_latents, multitalk_audio_embeds=multitalk_audio_embeds,
