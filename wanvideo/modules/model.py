@@ -14,7 +14,8 @@ except Exception:
     pass
 
 from .attention import attention
-from .wananimate2.animate2 import animate2_attention
+from .wananimate2.animate2 import animate2_attention, animate2_attention_mem_eff
+from .sage_mem_eff import sageattn_mem_eff
 import numpy as np
 from tqdm import tqdm
 import gc
@@ -1190,9 +1191,16 @@ class WanAttentionBlock(nn.Module):
             prefix_count = animate2_attn.get("prefix_count", 0)
             if prefix_count > 0 and animate2_attn.get("prefix_strength", 1.0) != 1.0:
                 v[:, hw:(1 + prefix_count) * hw] *= animate2_attn["prefix_strength"] # the extra references, in either layout
-            y = animate2_attention(q, k, v, animate2_attn["k"], animate2_attn["v"], animate2_attn["frames"], hw,
-                                   attention_mode=attention_mode_override or self.self_attn.attention_mode,
-                                   log_scale=animate2_attn["log_scale"], heads=self.num_heads, ref_frames=ref_frames)
+            if (attention_mode_override or self.self_attn.attention_mode) == "sageattn_mem_eff":
+                qkv = [q, k, v] # handed over so they're freed as soon as they're quantized
+                del q, k, v
+                y = animate2_attention_mem_eff(qkv, animate2_attn["k"], animate2_attn["v"], animate2_attn["frames"], hw,
+                                               log_scale=animate2_attn["log_scale"], ref_frames=ref_frames)
+                q = k = v = None
+            else:
+                y = animate2_attention(q, k, v, animate2_attn["k"], animate2_attn["v"], animate2_attn["frames"], hw,
+                                       attention_mode=attention_mode_override or self.self_attn.attention_mode,
+                                       log_scale=animate2_attn["log_scale"], heads=self.num_heads, ref_frames=ref_frames)
             y = self.self_attn.o(y.flatten(2))
         elif split_attn and chunked_self_attention:
             y = self.self_attn.forward_split(q, k, v, seq_lens, grid_sizes, seq_chunks)
@@ -1274,6 +1282,12 @@ class WanAttentionBlock(nn.Module):
 
                 # merge x_cond and x_noise
                 y = torch.cat([x_ref, x_cond, x_noise], dim=1).contiguous()
+        elif ((attention_mode_override or self.self_attn.attention_mode) == "sageattn_mem_eff" and lynx_ref_feature is None and onetoall_ref is None
+              and self.self_attn.ref_adapter is None):
+            qkv = [q, k, v] # handed over so they're freed as soon as they're quantized
+            del q, k, v
+            y = self.self_attn.o(sageattn_mem_eff(qkv).flatten(2))
+            q = k = v = None
         else:
             y = self.self_attn.forward(q, k, v, seq_lens, lynx_ref_feature=lynx_ref_feature, lynx_ref_scale=lynx_ref_scale,
                                        onetoall_ref=onetoall_ref, onetoall_ref_scale=onetoall_ref_scale, attention_mode_override=attention_mode_override, transformer_options=transformer_options, frame_tokens=frame_tokens)

@@ -105,7 +105,7 @@ def attention(q, k, v, q_lens=None, k_lens=None, max_seqlen_q=None, max_seqlen_k
         return sageattn_varlen_func(q,k,v, q_lens=q_lens, k_lens=k_lens, max_seqlen_k=max_seqlen_k, max_seqlen_q=max_seqlen_q)
     elif attention_mode == 'sageattn_compiled': # for sage versions that allow torch.compile, may be redundant now as other sageattn ops are wrapper in custom ops
         return sageattn_func_compiled(q, k, v, tensor_layout="NHD").contiguous()
-    elif attention_mode == 'sageattn':
+    elif attention_mode in ('sageattn', 'sageattn_mem_eff'): # the memory efficient variant needs the caller to hand over q/k/v, elsewhere it's regular sageattn
         return sageattn_func(q, k, v, tensor_layout="NHD").contiguous()
     elif attention_mode == 'sageattn_ultravico':
         return sageattn_func_ultravico([q, k, v], multi_factor=transformer_options.get("ultravico_alpha", 0.9), frame_tokens=frame_tokens).contiguous()
