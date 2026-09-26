@@ -36,7 +36,7 @@ try:
 except Exception:
     PromptServer = None
 
-attention_modes = ["sdpa", "flash_attn_2", "flash_attn_3", "sageattn", "sageattn_3", "radial_sage_attention", "sageattn_compiled",
+attention_modes = ["sdpa", "flash_attn_2", "flash_attn_3", "sageattn", "sageattn_mem_eff", "sageattn_3", "radial_sage_attention", "sageattn_compiled",
                     "sageattn_ultravico", "comfy"]
 
 #from city96's gguf nodes

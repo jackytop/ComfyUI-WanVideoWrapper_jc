@@ -130,6 +130,89 @@ def _animate2_attention_biased(q, k, v, k_pose, v_pose, pose_frames, hw, attenti
     return out
 
 
+def _lse_merge(out, lse, out_g, lse_g):
+    """Merges a key group's attention into out in place by logsumexp, returns the merged lse ([B, H, L])"""
+    new = torch.logaddexp(lse, lse_g)
+    out.mul_(torch.exp(lse - new).transpose(1, 2).unsqueeze(-1).to(out.dtype))
+    out.addcmul_(out_g, torch.exp(lse_g - new).transpose(1, 2).unsqueeze(-1).to(out.dtype))
+    return new
+
+
+@torch.compiler.disable
+def animate2_attention_mem_eff(qkv, k_pose, v_pose, frames, hw, log_scale=0.0, ref_frames=0):
+    """animate2_attention with the memory efficient SageAttention: qkv is a [q, k, v] list holding the only references.
+    Every key group (and the pose frames) is quantized up front while the bf16 q/k/v are dropped one by one, then the
+    groups run on the quantized tensors and are merged by logsumexp. Quantization, kernels and results are the ones
+    sageattn gives for the same key groups."""
+    from .. import sage_mem_eff as me
+    q, k, v = qkv
+    qkv.clear()
+    B, L, H, D = q.shape
+    valid = frames * hw
+    first = 1 + ref_frames
+    if L != valid or not me.supported(q):
+        return animate2_attention(q, k, v, k_pose, v_pose, frames, hw, attention_mode="sageattn", log_scale=log_scale, heads=H, ref_frames=ref_frames)
+    k, v = k.to(q.dtype), v.to(q.dtype)
+    cfg = me.config(q.device)
+    sm_scale = D ** -0.5
+    dtype, device = q.dtype, q.device
+    pose_frames = max(0, min(k_pose.shape[1] // hw, frames - first))
+    if k_pose.shape[0] != B:
+        k_pose, v_pose = k_pose.expand(B, -1, -1, -1), v_pose.expand(B, -1, -1, -1)
+
+    # generation key groups: the first video frame on its own when it's biased
+    if log_scale != 0.0 and frames > first:
+        bounds = [(0, first, 0.0), (first, first + 1, log_scale), (first + 1, frames, 0.0)]
+    else:
+        bounds = [(0, frames, 0.0)]
+    groups = []
+    for a, b, bias in bounds:
+        if b <= a:
+            continue
+        k_int8, k_scale, km = me.quant_k(k[:, a * hw:b * hw], cfg)
+        groups.append({"k": (k_int8, k_scale), "corr": me.lse_correction(q, km, sm_scale) + bias, "range": (a, b)})
+        del km
+    del k
+    for g in groups:
+        a, b = g["range"]
+        g["v"] = me.quant_v(v[:, a * hw:b * hw], cfg)
+    del v
+
+    pose = None
+    if pose_frames > 0:
+        # query frame first + j against pose frame j, batched over the frames
+        n = pose_frames
+        q_p = q[:, first * hw:(first + n) * hw].reshape(B * n, hw, H, D)
+        k_p = k_pose[:, :n * hw].reshape(B * n, hw, H, D).to(dtype)
+        kp_int8, kp_scale, kpm = me.quant_k(k_p, cfg)
+        pose = {"k": (kp_int8, kp_scale), "corr": me.lse_correction(q_p, kpm, sm_scale), "q": me.quant_q(q_p, cfg),
+                "v": me.quant_v(v_pose[:, :n * hw].reshape(B * n, hw, H, D).to(dtype), cfg), "n": n}
+        del q_p, k_p, kpm
+    q_int8, q_scale = me.quant_q(q, cfg)
+    del q
+
+    out = lse = None
+    for g in groups:
+        o = torch.empty((B, L, H, D), dtype=dtype, device=device)
+        lse_g = me.kernel(q_int8, q_scale, *g["k"], *g["v"], o, cfg, sm_scale, return_lse=True) + g["corr"]
+        g.clear()
+        if out is None:
+            out, lse = o, lse_g
+        else:
+            lse = _lse_merge(out, lse, o, lse_g)
+        del o, lse_g
+    del q_int8, q_scale, groups
+
+    if pose is not None:
+        n = pose["n"]
+        o = torch.empty((B * n, hw, H, D), dtype=dtype, device=device)
+        lse_p = me.kernel(*pose["q"], *pose["k"], *pose["v"], o, cfg, sm_scale, return_lse=True) + pose["corr"]
+        pose_range = slice(first * hw, (first + n) * hw)
+        _lse_merge(out[:, pose_range], lse[..., pose_range], o.reshape(B, n * hw, H, D),
+                   lse_p.reshape(B, n, H, hw).transpose(1, 2).reshape(B, H, n * hw))
+    return out
+
+
 class Animate2PoseCache:
     """Pose branch block inputs, reused across the sampling steps and the cond/uncond passes.
 
