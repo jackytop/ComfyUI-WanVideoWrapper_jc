@@ -2176,6 +2176,10 @@ class WanVideoContextOptions:
             "optional": {
                 "fuse_method": (["linear", "pyramid"], {"default": "linear", "tooltip": "Window weight function: linear=ramps at edges only, pyramid=triangular weights peaking in middle"}),
                 "reference_latent": ("LATENT", {"tooltip": "Image to be used as init for I2V models for windows where first frame is not the actual first frame. Mostly useful with MAGREF model"}),
+                "anchor_frames": ("INT", {"default": 0, "min": 0, "max": 8, "step": 1, "tooltip": "SCAIL-2 only, experimental: every window after the first also sees the video's first N latent frames "
+                                  "(at the same denoising step, their predictions there are discarded), so all windows settle on the same background and outfit. 1-2 is a good start"}),
+                "anchor_rope": (["adjacent", "timeline"], {"default": "adjacent", "tooltip": "Where the anchor frames sit in time for the window: adjacent = right before the window's frames (strongest pull), "
+                                "timeline = at their real distance in the video (weaker, positions past the trained length for long videos)"}),
             }
         }
 
@@ -2185,7 +2189,8 @@ class WanVideoContextOptions:
     CATEGORY = "WanVideoWrapper"
     DESCRIPTION = "Context options for WanVideo, allows splitting the video into context windows and attemps blending them for longer generations than the model and memory otherwise would allow."
 
-    def process(self, context_schedule, context_frames, context_stride, context_overlap, freenoise, verbose, image_cond_start_step=6, image_cond_window_count=2, vae=None, fuse_method="linear", reference_latent=None):
+    def process(self, context_schedule, context_frames, context_stride, context_overlap, freenoise, verbose, image_cond_start_step=6, image_cond_window_count=2, vae=None, fuse_method="linear", reference_latent=None,
+                anchor_frames=0, anchor_rope="adjacent"):
         context_options = {
             "context_schedule":context_schedule,
             "context_frames":context_frames,
@@ -2195,6 +2200,8 @@ class WanVideoContextOptions:
             "verbose":verbose,
             "fuse_method":fuse_method,
             "reference_latent":reference_latent["samples"] if reference_latent is not None else None,
+            "anchor_frames": anchor_frames,
+            "anchor_rope": anchor_rope,
         }
 
         return (context_options,)

@@ -2361,28 +2361,29 @@ class WanModel(torch.nn.Module):
         return freqs
 
     #region SCAIL-2
-    def rope_encode_scail2(self, ref_frames, video_frames, h, w, pose, replace, ntk_alphas=[1, 1, 1], device=None):
+    def rope_encode_scail2(self, ref_frames, video_frames, h, w, pose, replace, ntk_alphas=[1, 1, 1], device=None, video_t=None):
         """RoPE for [additional refs | ref | video | pose] as upstream SCAIL-2 lays them out.
 
         Animation mode puts the video one frame after the references, replacement mode starts it at the reference's frame
         and moves the references 120 rows down instead. The pose sits 120 columns right, its half resolution grid gets the
-        full resolution freqs averaged over 2x2.
+        full resolution freqs averaged over 2x2. video_t optionally gives each video frame's time offset (context window anchors).
         """
-        key = (ref_frames, video_frames, h, w, pose, replace, self.rope_embedder.k, tuple(ntk_alphas), str(device))
+        key = (ref_frames, video_frames, h, w, pose, replace, self.rope_embedder.k, tuple(ntk_alphas), str(device), video_t)
         if getattr(self, "scail2_freqs_key", None) == key:
             return self.scail2_freqs
 
-        def ids(t0, t, h0, w0, hh, ww):
-            grid = torch.meshgrid(torch.arange(t0, t0 + t, device=device, dtype=torch.float32),
+        def ids(t, h0, w0, hh, ww):
+            grid = torch.meshgrid(t.to(device, torch.float32),
                                   torch.arange(h0, h0 + hh, device=device, dtype=torch.float32),
                                   torch.arange(w0, w0 + ww, device=device, dtype=torch.float32), indexing="ij")
             return torch.stack(grid, dim=-1).reshape(1, -1, 3)
 
         video_t0 = ref_frames - (1 if replace else 0)
-        segments = [ids(0, ref_frames, 120 if replace else 0, 0, h, w), ids(video_t0, video_frames, 0, 0, h, w)]
+        video_ts = video_t0 + (torch.tensor(video_t, dtype=torch.float32) if video_t is not None else torch.arange(video_frames, dtype=torch.float32))
+        segments = [ids(torch.arange(ref_frames, dtype=torch.float32), 120 if replace else 0, 0, h, w), ids(video_ts, 0, 0, h, w)]
         freqs = self.rope_embedder(torch.cat(segments, dim=1), ntk_alphas).movedim(1, 2)
         if pose:
-            pose_freqs = self.rope_embedder(ids(video_t0, video_frames, 0, 120, h, w), ntk_alphas).movedim(1, 2)
+            pose_freqs = self.rope_embedder(ids(video_ts, 0, 120, h, w), ntk_alphas).movedim(1, 2)
             B, _, heads, dim = pose_freqs.shape[:4]
             pose_freqs = pose_freqs.reshape(B, video_frames, h, w, heads, dim, 2, 2).permute(0, 1, 4, 5, 6, 7, 2, 3).reshape(-1, h, w)
             pose_freqs = F.avg_pool2d(pose_freqs, kernel_size=2, stride=2)
@@ -2823,7 +2824,8 @@ class WanModel(torch.nn.Module):
                 scail2_pose = True
                 del pose_in, pose_emb, pose_x
             freqs = self.rope_encode_scail2(scail2_ref_frames, f - scail2_ref_frames, h, w, scail2_pose,
-                                            scail2_input.get("replace", False), ntk_alphas=ntk_alphas, device=x[0].device)
+                                            scail2_input.get("replace", False), ntk_alphas=ntk_alphas, device=x[0].device,
+                                            video_t=scail2_input.get("video_t", None))
 
         # Wan-Animate-2 extra references in the "reference" layout share the reference slot's time position
         if animate2_input is not None and animate2_input.get("ref_frames", 0) > 0:
