@@ -25,6 +25,8 @@ class WanVideoEverAnimateEmbeds:
                 "anchor_mode": (["random_plus_user", "user_image"], {"default": "random_plus_user", "tooltip": "Keep three frames from the first generated chunk plus the user reference as four persistent anchors."}),
                 "seed_multiplier": ("INT", {"default": 42, "min": 1, "max": 10000, "tooltip": "Add this to the sampler seed for each new chunk. The sampler seed also controls anchor selection."}),
                 "tiled_vae": ("BOOLEAN", {"default": False, "tooltip": "Use VAE tiling for reference encoding and all chunk encoding/decoding inside WanVideo Sampler."}),
+                "pose_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001, "tooltip": "Pose conditioning strength for every chunk. 1.0 matches the original behavior; 0 disables the pose adapter contribution."}),
+                "face_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001, "tooltip": "Face conditioning strength for every chunk. 1.0 matches the original behavior; 0 disables the face adapter contribution."}),
             },
         }
 
@@ -36,7 +38,7 @@ class WanVideoEverAnimateEmbeds:
 
     def process(self, vae, clip_vision, reference_image, pose_images, face_images, width, height,
                 frames_per_chunk, num_chunks, loop_mode="pingpong", anchor_mode="random_plus_user",
-                seed_multiplier=42, tiled_vae=False):
+                seed_multiplier=42, tiled_vae=False, pose_strength=1.0, face_strength=1.0):
         if vae.upsampling_factor != 8:
             raise ValueError("EverAnimate needs the Wan2.1 VAE (16 latent channels, spatial scale 8).")
         width, height = width // 16 * 16, height // 16 * 16
@@ -58,6 +60,7 @@ class WanVideoEverAnimateEmbeds:
             "width": width, "height": height, "frames_per_chunk": frames_per_chunk, "num_chunks": num_chunks,
             "loop_mode": loop_mode, "anchor_mode": anchor_mode,
             "seed_multiplier": seed_multiplier, "tiled_vae": tiled_vae,
+            "pose_strength": pose_strength, "face_strength": face_strength,
         }},)
 
 
@@ -92,6 +95,8 @@ class WanVideoEverAnimateSampler:
                 "cache_args": ("CACHEARGS",),
                 "feta_args": ("FETAARGS",),
                 "sigmas": ("SIGMAS", {"tooltip": "Optional complete sigma schedule including the final zero; overrides steps and shift."}),
+                "pose_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001, "tooltip": "Pose conditioning strength for every chunk. 1.0 matches the original behavior; 0 disables the pose adapter contribution."}),
+                "face_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001, "tooltip": "Face conditioning strength for every chunk. 1.0 matches the original behavior; 0 disables the face adapter contribution."}),
             },
         }
 
@@ -104,10 +109,12 @@ class WanVideoEverAnimateSampler:
     def process(self, model, vae, text_embeds, clip_vision, reference_image, pose_images, face_images,
                 width, height, frames_per_chunk, num_chunks, steps, cfg, shift, seed, force_offload,
                 tiled_vae, scheduler="euler", seed_multiplier=42, loop_mode="pingpong",
-                anchor_mode="random_plus_user", cache_args=None, feta_args=None, sigmas=None):
+                anchor_mode="random_plus_user", cache_args=None, feta_args=None, sigmas=None,
+                pose_strength=1.0, face_strength=1.0):
         embeds = WanVideoEverAnimateEmbeds().process(
             vae, clip_vision, reference_image, pose_images, face_images, width, height,
-            frames_per_chunk, num_chunks, loop_mode, anchor_mode, seed_multiplier, tiled_vae)[0]
+            frames_per_chunk, num_chunks, loop_mode, anchor_mode, seed_multiplier, tiled_vae,
+            pose_strength=pose_strength, face_strength=face_strength)[0]
         result, _ = WanVideoSampler().process(
             model=model, image_embeds=embeds, text_embeds=text_embeds, shift=shift, steps=steps, cfg=cfg,
             seed=seed, scheduler=scheduler, riflex_freq_index=0, force_offload=force_offload,

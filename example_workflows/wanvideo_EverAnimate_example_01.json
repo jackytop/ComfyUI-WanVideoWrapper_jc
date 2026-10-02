@@ -501,7 +501,7 @@
       ],
       "size": [
         400,
-        700
+        748
       ],
       "flags": {},
       "order": 10,
@@ -595,7 +595,9 @@
         "euler",
         42,
         "pingpong",
-        "random_plus_user"
+        "random_plus_user",
+        1.0,
+        1.0
       ]
     },
     {
@@ -783,5 +785,5 @@
   "last_node_id": 12,
   "last_link_id": 10,
   "id": "b9290ee0-b43b-494c-b82b-a79a3b4d8058",
-  "revision": 0
+  "revision": 1
 }

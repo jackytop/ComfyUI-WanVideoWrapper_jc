@@ -117,6 +117,8 @@ def sample_everanimate(sample, model, embeds, steps, shift, seed, scheduler, sig
                 clip_embeds = clip_encoder.process(clip_vision, current_image, strength_1=1.0, strength_2=1.0,
                                                   force_offload=True, crop="center", combine_embeds="average")[0]
             chunk_embeds = make_chunk_embeds(anchors, motion, pose_latents, faces, clip_embeds, frames_per_chunk)
+            chunk_embeds["pose_strength"] = embeds.get("pose_strength", 1.0)
+            chunk_embeds["face_strength"] = embeds.get("face_strength", 1.0)
             chunk_seed = (seed + chunk_index * embeds["seed_multiplier"]) % (1 << 64)
             sampled, denoised = sample(model=model, image_embeds=chunk_embeds, shift=shift, steps=steps,
                                        seed=chunk_seed, scheduler=scheduler, sigmas=sigmas, **sampling_options)

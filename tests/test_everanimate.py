@@ -113,6 +113,8 @@ class EverAnimateTests(unittest.TestCase):
         self.assertEqual(ea_nodes.WanVideoEverAnimateEmbeds.RETURN_TYPES, ("WANVIDIMAGE_EMBEDS",))
         self.assertEqual(output["everanimate"]["reference_latent"].shape, (16, 1, 8, 8))
         self.assertTrue(torch.all(output["everanimate"]["reference_latent"] == -0.5))
+        self.assertEqual(output["everanimate"]["pose_strength"], 1.0)
+        self.assertEqual(output["everanimate"]["face_strength"], 1.0)
         self.assertEqual(str(vae.device), "cpu")
         self.assertTrue(torch.all(reference == 0.25))
 
@@ -154,11 +156,22 @@ class EverAnimateTests(unittest.TestCase):
 
     def test_actual_pose_adapter_skips_four_anchors(self):
         holder = types.SimpleNamespace(pose_patch_embedding=torch.nn.Identity())
-        video = [torch.zeros(1, 16, 7, 2, 2)]
         pose = torch.ones(1, 16, 3, 2, 2)
-        result = WanModel.wananimate_pose_embedding(holder, video, pose, num_anchor_latents=4)
-        self.assertTrue(torch.all(result[0][:, :, :4] == 0))
-        self.assertTrue(torch.all(result[0][:, :, 4:] == 1))
+        for strength in (0.0, 0.5, 1.0, 2.0):
+            with self.subTest(strength=strength):
+                video = [torch.zeros(1, 16, 7, 2, 2)]
+                result = WanModel.wananimate_pose_embedding(holder, video, pose, strength=strength, num_anchor_latents=4)
+                self.assertTrue(torch.all(result[0][:, :, :4] == 0))
+                self.assertTrue(torch.all(result[0][:, :, 4:] == strength))
+
+    def test_actual_face_adapter_scales_its_contribution(self):
+        video = torch.ones(1, 7, 4)
+        block = types.SimpleNamespace(fuser_block=lambda x, motion, mask: torch.full_like(x, 2.0))
+        for strength in (0.0, 0.5, 1.0, 2.0):
+            with self.subTest(strength=strength):
+                result = WanModel.wananimate_forward(None, block, video, None, strength=strength)
+                self.assertTrue(torch.all(result == 1.0 + 2.0 * strength))
+        self.assertTrue(torch.all(video == 1.0))
 
     def test_actual_face_adapter_skips_four_anchors(self):
         class Motion(torch.nn.Module):
@@ -201,6 +214,8 @@ class EverAnimateTests(unittest.TestCase):
             self.assertEqual(kwargs["seed"], 11 + (len(calls) - 1) * 42)
             self.assertEqual(kwargs["steps"], 2)
             self.assertEqual(kwargs["cfg"], 1.0)
+            self.assertEqual(kwargs["image_embeds"]["pose_strength"], 0.6)
+            self.assertEqual(kwargs["image_embeds"]["face_strength"], 0.35)
             self.assertEqual(kwargs["rope_function"], "comfy_chunked")
             self.assertIs(kwargs["cache_args"], cache)
             torch.testing.assert_close(kwargs["scheduler"]["timesteps"], torch.tensor([1000.0, 5000 / 6]))
@@ -218,7 +233,7 @@ class EverAnimateTests(unittest.TestCase):
              patch.object(ea.WanVideoClipVisionEncode, "process", side_effect=clip_encode), \
              patch.object(ea.WanVideoDecode, "decode", side_effect=decode):
             embeds, = ea_nodes.WanVideoEverAnimateEmbeds().process(
-                vae, clip, reference, pose, face, 64, 64, 9, 3)
+                vae, clip, reference, pose, face, 64, 64, 9, 3, pose_strength=0.6, face_strength=0.35)
             initial_reference = embeds["everanimate"]["reference_latent"].clone()
             result, _ = original_process(
                 WanVideoSampler(), model, embeds, 5.0, 2, 1.0, 11, "euler", 0,
@@ -250,6 +265,8 @@ class EverAnimateTests(unittest.TestCase):
         def sample(**kwargs):
             self.assertIs(kwargs["scheduler"], explicit)
             self.assertEqual(kwargs["cfg"], 2.5)
+            self.assertEqual(kwargs["image_embeds"]["pose_strength"], 0.0)
+            self.assertEqual(kwargs["image_embeds"]["face_strength"], 1.5)
             self.assertEqual(kwargs["seed"], 5 + len(conditions) * 7)
             conditions.append(kwargs["image_embeds"]["ref_latent"][4:, :4].clone())
             return {"samples": torch.ones(1, 16, 7, 8, 8)}, {"samples": None}
@@ -258,7 +275,7 @@ class EverAnimateTests(unittest.TestCase):
              patch.object(ea.WanVideoDecode, "decode", return_value=(reference.repeat(9, 1, 1, 1),)):
             embeds, = ea_nodes.WanVideoEverAnimateEmbeds().process(
                 vae, clip, reference, reference, reference, 64, 64, 9, 2,
-                anchor_mode="user_image", seed_multiplier=7)
+                anchor_mode="user_image", seed_multiplier=7, pose_strength=0.0, face_strength=1.5)
             result, _ = ea.sample_everanimate(sample, model, embeds["everanimate"], 3, 5, 5, explicit, cfg=2.5)
         self.assertEqual(result["video"].shape[0], 14)
         for condition in conditions:
@@ -273,8 +290,10 @@ class EverAnimateTests(unittest.TestCase):
              patch.object(WanVideoSampler, "process", return_value=({"video": raw_video, "samples": last}, {})) as sampler:
             frames, latent = ea_nodes.WanVideoEverAnimateSampler().process(
                 object(), vae, {}, object(), reference, reference, reference,
-                64, 64, 9, 1, 2, 1.0, 5.0, 11, True, False)
+                64, 64, 9, 1, 2, 1.0, 5.0, 11, True, False, pose_strength=0.4, face_strength=1.25)
         self.assertIn("everanimate", sampler.call_args.kwargs["image_embeds"])
+        self.assertEqual(sampler.call_args.kwargs["image_embeds"]["everanimate"]["pose_strength"], 0.4)
+        self.assertEqual(sampler.call_args.kwargs["image_embeds"]["everanimate"]["face_strength"], 1.25)
         self.assertTrue(torch.allclose(frames, torch.full_like(frames, 0.2)))
         self.assertIs(latent["samples"], last)
 

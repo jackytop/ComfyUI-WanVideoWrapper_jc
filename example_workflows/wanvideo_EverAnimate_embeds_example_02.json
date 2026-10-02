@@ -589,7 +589,7 @@
       ],
       "size": [
         380,
-        500
+        548
       ],
       "flags": {},
       "order": 10,
@@ -642,7 +642,9 @@
         "pingpong",
         "random_plus_user",
         42,
-        false
+        false,
+        1.0,
+        1.0
       ]
     },
     {
@@ -968,5 +970,5 @@
   "last_node_id": 14,
   "last_link_id": 13,
   "id": "604600db-9ac1-48c7-a745-77563deff891",
-  "revision": 0
+  "revision": 1
 }
