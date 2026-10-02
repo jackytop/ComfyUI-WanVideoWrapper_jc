@@ -2396,9 +2396,7 @@ class WanVideoDecode:
         mm.soft_empty_cache()
         video = samples.get("video", None)
         if video is not None:
-            video.clamp_(-1.0, 1.0)
-            video.add_(1.0).div_(2.0)
-            return video.cpu().float(),
+            return video.clamp(-1.0, 1.0).add_(1.0).div_(2.0).cpu().float(),
         latents = samples["samples"].clone()
         end_image = samples.get("end_image", None)
         has_ref = samples.get("has_ref", False)

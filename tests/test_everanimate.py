@@ -22,7 +22,9 @@ server.PromptServer.instance = types.SimpleNamespace(last_node_id=None, client_i
 package = types.ModuleType("wanvideo_everanimate_test")
 package.__path__ = [str(PACK)]
 sys.modules[package.__name__] = package
-from wanvideo_everanimate_test.everanimate import nodes as ea
+from wanvideo_everanimate_test.everanimate import nodes as ea_nodes
+from wanvideo_everanimate_test.everanimate import sampling as ea
+from wanvideo_everanimate_test.nodes_sampler import WanVideoSampler
 from wanvideo_everanimate_test.wanvideo.modules.model import WanModel
 
 
@@ -41,21 +43,28 @@ class FakeVAE:
 
 class EverAnimateTests(unittest.TestCase):
     def test_example_widget_order_and_types(self):
-        workflow = json.loads((PACK / "example_workflows/wanvideo_EverAnimate_example_01.json").read_text(encoding="utf-8"))
-        node = next(n for n in workflow["nodes"] if n["type"] == "WanVideoEverAnimateSampler_jc")
-        values = iter(node["widgets_values"])
-        schema = ea.WanVideoEverAnimateSampler.INPUT_TYPES()
-        for group in ("required", "optional"):
-            for name, spec in schema[group].items():
-                kind = spec[0]
-                if isinstance(kind, list):
-                    self.assertIn(next(values), kind)
-                elif kind in ("INT", "FLOAT", "BOOLEAN"):
-                    value = next(values)
-                    self.assertIsInstance(value, {"INT": int, "FLOAT": (int, float), "BOOLEAN": bool}[kind], name)
-                    if name == "seed":
-                        self.assertEqual(next(values), "fixed")
-        self.assertEqual(list(values), [])
+        classes = {"WanVideoEverAnimateSampler_jc": ea_nodes.WanVideoEverAnimateSampler,
+                   "WanVideoEverAnimateEmbeds_jc": ea_nodes.WanVideoEverAnimateEmbeds,
+                   "WanVideoSampler_jc": WanVideoSampler, "WanVideoDecode_jc": ea.WanVideoDecode}
+        for filename in ("wanvideo_EverAnimate_example_01.json", "wanvideo_EverAnimate_embeds_example_02.json"):
+            workflow = json.loads((PACK / "example_workflows" / filename).read_text(encoding="utf-8"))
+            for node in workflow["nodes"]:
+                if node["type"] not in classes:
+                    continue
+                with self.subTest(workflow=filename, node=node["type"]):
+                    values = iter(node["widgets_values"])
+                    schema = classes[node["type"]].INPUT_TYPES()
+                    for group in ("required", "optional"):
+                        for name, spec in schema.get(group, {}).items():
+                            kind = spec[0]
+                            if isinstance(kind, list):
+                                self.assertIn(next(values), kind)
+                            elif kind in ("INT", "FLOAT", "BOOLEAN"):
+                                value = next(values)
+                                self.assertIsInstance(value, {"INT": int, "FLOAT": (int, float), "BOOLEAN": bool}[kind], name)
+                                if name == "seed":
+                                    self.assertEqual(next(values), "fixed")
+                    self.assertEqual(list(values), [])
 
     def test_reference_schedule_and_euler_update(self):
         config = ea.make_scheduler(4, 5.0, torch.device("cpu"))
@@ -76,6 +85,36 @@ class EverAnimateTests(unittest.TestCase):
         torch.testing.assert_close(config["sample_scheduler"].sigmas, sigmas)
         torch.testing.assert_close(config["timesteps"], sigmas[:-1] * 1000)
         self.assertNotEqual(config["sample_scheduler"].sigmas.data_ptr(), sigmas.data_ptr())
+
+    def test_reference_schedule_respects_step_range(self):
+        config = ea.make_scheduler(4, 5, torch.device("cpu"), start_step=1, end_step=3)
+        torch.testing.assert_close(config["sample_scheduler"].sigmas, torch.tensor([15 / 16, 5 / 6, 5 / 8]))
+        torch.testing.assert_close(config["timesteps"], torch.tensor([15 / 16, 5 / 6]) * 1000)
+        self.assertEqual(config["start_step"], 1)
+
+    def test_loop_decode_does_not_change_cached_video(self):
+        video = torch.linspace(-1, 1, 18).reshape(2, 1, 3, 3)
+        original = video.clone()
+        decoder = ea.WanVideoDecode()
+        first = decoder.decode(None, {"video": video}, False, 272, 272, 144, 128)[0]
+        second = decoder.decode(None, {"video": video}, False, 272, 272, 144, 128)[0]
+        torch.testing.assert_close(first, (original + 1) / 2)
+        torch.testing.assert_close(second, first)
+        torch.testing.assert_close(video, original)
+
+    def test_embeds_prepare_reference_without_sampling(self):
+        reference = torch.full((1, 64, 64, 3), 0.25)
+        vae = FakeVAE()
+        with patch.object(ea.WanVideoClipVisionEncode, "process", return_value=({"clip_embeds": None},)), \
+             patch.object(WanVideoSampler, "process") as sampler:
+            output, = ea_nodes.WanVideoEverAnimateEmbeds().process(
+                vae, object(), reference, reference, reference, 64, 64, 9, 3)
+        sampler.assert_not_called()
+        self.assertEqual(ea_nodes.WanVideoEverAnimateEmbeds.RETURN_TYPES, ("WANVIDIMAGE_EMBEDS",))
+        self.assertEqual(output["everanimate"]["reference_latent"].shape, (16, 1, 8, 8))
+        self.assertTrue(torch.all(output["everanimate"]["reference_latent"] == -0.5))
+        self.assertEqual(str(vae.device), "cpu")
+        self.assertTrue(torch.all(reference == 0.25))
 
     def test_optional_solvers_accept_reference_schedule(self):
         for name in ("unipc", "dpm++"):
@@ -146,14 +185,25 @@ class EverAnimateTests(unittest.TestCase):
         reference = torch.full((1, 64, 64, 3), 0.25)
         pose = torch.arange(20.0)[:, None, None, None].expand(20, 64, 64, 3) / 20
         face = pose.clone()
+        original_process = WanVideoSampler.process
+        original_decode = ea.WanVideoDecode.decode
+        cache = {"cache_type": "test"}
 
         def clip_encode(*args, **kwargs):
             clip_images.append(args[1].clone())
             return ({"clip_embeds": torch.zeros(1, 257, 1280)},)
 
         def sample(**kwargs):
+            if "everanimate" in kwargs["image_embeds"]:
+                return original_process(WanVideoSampler(), **kwargs)
             calls.append(copy.deepcopy(kwargs["image_embeds"]))
+            self.assertNotIn("everanimate", kwargs["image_embeds"])
             self.assertEqual(kwargs["seed"], 11 + (len(calls) - 1) * 42)
+            self.assertEqual(kwargs["steps"], 2)
+            self.assertEqual(kwargs["cfg"], 1.0)
+            self.assertEqual(kwargs["rope_function"], "comfy_chunked")
+            self.assertIs(kwargs["cache_args"], cache)
+            torch.testing.assert_close(kwargs["scheduler"]["timesteps"], torch.tensor([1000.0, 5000 / 6]))
             samples = torch.full((1, 16, 7, 8, 8), float(len(calls)))
             samples[:, :, :4] = -99  # These slots must never be decoded or propagated as motion.
             return {"samples": samples, "has_ref": True, "ref_trim": (0, 3)}, {}
@@ -164,11 +214,16 @@ class EverAnimateTests(unittest.TestCase):
             frames = torch.linspace(level, level + 0.08, 9)[:, None, None, None].expand(9, 64, 64, 3).clone()
             return (frames,)
 
-        with patch.object(ea.WanVideoSampler, "process", side_effect=sample), \
+        with patch.object(WanVideoSampler, "process", side_effect=sample), \
              patch.object(ea.WanVideoClipVisionEncode, "process", side_effect=clip_encode), \
              patch.object(ea.WanVideoDecode, "decode", side_effect=decode):
-            frames, last = ea.WanVideoEverAnimateSampler().process(
-                model, vae, {}, clip, reference, pose, face, 64, 64, 9, 3, 2, 1.0, 5.0, 11, True, False)
+            embeds, = ea_nodes.WanVideoEverAnimateEmbeds().process(
+                vae, clip, reference, pose, face, 64, 64, 9, 3)
+            initial_reference = embeds["everanimate"]["reference_latent"].clone()
+            result, _ = original_process(
+                WanVideoSampler(), model, embeds, 5.0, 2, 1.0, 11, "euler", 0,
+                text_embeds={}, force_offload=True, rope_function="comfy_chunked", cache_args=cache)
+        frames = original_decode(ea.WanVideoDecode(), vae, result, False, 272, 272, 144, 128)[0]
         self.assertEqual(frames.shape, (19, 64, 64, 3))
         torch.testing.assert_close(clip_images[0], reference)
         torch.testing.assert_close(clip_images[1], torch.full_like(reference, 0.18))
@@ -178,8 +233,50 @@ class EverAnimateTests(unittest.TestCase):
         self.assertTrue(torch.all(calls[2]["ref_latent"][4:, 4:5] == 2))
         self.assertTrue(torch.all(calls[2]["ref_latent"][4:, 3:4] == -0.5))
         self.assertAlmostEqual(calls[1]["pose_latents"][0, 0, 0, 0, 0].item(), -0.5)
-        self.assertTrue(torch.all(last["samples"] == 3))
+        self.assertTrue(torch.all(result["samples"] == 3))
         self.assertTrue(torch.all(reference == 0.25))
+        torch.testing.assert_close(embeds["everanimate"]["reference_latent"], initial_reference)
+        self.assertAlmostEqual(frames[9, 0, 0, 0].item(), 0.24)
+        self.assertAlmostEqual(frames[14, 0, 0, 0].item(), 0.34)
+
+    def test_user_anchors_and_explicit_scheduler_are_retained(self):
+        reference = torch.full((1, 64, 64, 3), 0.25)
+        vae = FakeVAE()
+        clip = types.SimpleNamespace(model=types.SimpleNamespace(to=lambda device: None))
+        model = types.SimpleNamespace(model=types.SimpleNamespace(diffusion_model=types.SimpleNamespace(pose_patch_embedding=True)))
+        explicit = ea.make_scheduler(3, 2, torch.device("cpu"))
+        conditions = []
+
+        def sample(**kwargs):
+            self.assertIs(kwargs["scheduler"], explicit)
+            self.assertEqual(kwargs["cfg"], 2.5)
+            self.assertEqual(kwargs["seed"], 5 + len(conditions) * 7)
+            conditions.append(kwargs["image_embeds"]["ref_latent"][4:, :4].clone())
+            return {"samples": torch.ones(1, 16, 7, 8, 8)}, {"samples": None}
+
+        with patch.object(ea.WanVideoClipVisionEncode, "process", return_value=({"clip_embeds": None},)), \
+             patch.object(ea.WanVideoDecode, "decode", return_value=(reference.repeat(9, 1, 1, 1),)):
+            embeds, = ea_nodes.WanVideoEverAnimateEmbeds().process(
+                vae, clip, reference, reference, reference, 64, 64, 9, 2,
+                anchor_mode="user_image", seed_multiplier=7)
+            result, _ = ea.sample_everanimate(sample, model, embeds["everanimate"], 3, 5, 5, explicit, cfg=2.5)
+        self.assertEqual(result["video"].shape[0], 14)
+        for condition in conditions:
+            self.assertTrue(torch.all(condition == -0.5))
+
+    def test_legacy_sampler_uses_the_same_embeds_path(self):
+        reference = torch.full((1, 64, 64, 3), 0.25)
+        vae = FakeVAE()
+        raw_video = torch.full((9, 64, 64, 3), -0.6)
+        last = torch.ones(1, 16, 3, 8, 8)
+        with patch.object(ea.WanVideoClipVisionEncode, "process", return_value=({"clip_embeds": None},)), \
+             patch.object(WanVideoSampler, "process", return_value=({"video": raw_video, "samples": last}, {})) as sampler:
+            frames, latent = ea_nodes.WanVideoEverAnimateSampler().process(
+                object(), vae, {}, object(), reference, reference, reference,
+                64, 64, 9, 1, 2, 1.0, 5.0, 11, True, False)
+        self.assertIn("everanimate", sampler.call_args.kwargs["image_embeds"])
+        self.assertTrue(torch.allclose(frames, torch.full_like(frames, 0.2)))
+        self.assertIs(latent["samples"], last)
 
 
 if __name__ == "__main__":

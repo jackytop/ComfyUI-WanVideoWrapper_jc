@@ -11,6 +11,7 @@ from .multitalk.multitalk import add_noise
 from .utils import(log, print_memory, apply_lora, fourier_filter, optimized_scale, setup_radial_attention,
                    compile_model, dict_to_device, tangential_projection, get_raag_guidance, temporal_score_rescaling, offload_transformer, init_blockswap)
 from .multitalk.multitalk_loop import multitalk_loop
+from .everanimate.sampling import sample_everanimate
 from .cache_methods.cache_methods import cache_report
 from .nodes_model_loading import load_weights
 from .enhance_a_video.globals import set_enhance_weight, set_num_frames
@@ -82,6 +83,16 @@ class WanVideoSampler:
         force_offload=True, samples=None, feta_args=None, denoise_strength=1.0, context_options=None,
         cache_args=None, teacache_args=None, flowedit_args=None, batched_cfg=False, slg_args=None, rope_function="default", loop_args=None,
         experimental_args=None, sigmas=None, unianimate_poses=None, fantasytalking_embeds=None, uni3c_embeds=None, multitalk_embeds=None, freeinit_args=None, start_step=0, end_step=-1, add_noise_to_samples=False):
+        if "everanimate" in image_embeds:
+            return sample_everanimate(
+                WanVideoSampler().process, model, image_embeds["everanimate"], steps, shift, seed, scheduler, sigmas,
+                cfg=cfg, riflex_freq_index=riflex_freq_index, text_embeds=text_embeds, force_offload=force_offload,
+                samples=samples, feta_args=feta_args, denoise_strength=denoise_strength, context_options=context_options,
+                cache_args=cache_args, teacache_args=teacache_args, flowedit_args=flowedit_args, batched_cfg=batched_cfg,
+                slg_args=slg_args, rope_function=rope_function, loop_args=loop_args, experimental_args=experimental_args,
+                unianimate_poses=unianimate_poses, fantasytalking_embeds=fantasytalking_embeds, uni3c_embeds=uni3c_embeds,
+                multitalk_embeds=multitalk_embeds, freeinit_args=freeinit_args, start_step=start_step, end_step=end_step,
+                add_noise_to_samples=add_noise_to_samples)
         if flowedit_args is not None:
             raise Exception("FlowEdit support has been deprecated and removed due to lack of use and code maintainability")
         patcher = model
