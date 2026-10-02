@@ -5,6 +5,22 @@
 
 This fork installs next to the original ComfyUI-WanVideoWrapper: clone it into `custom_nodes/ComfyUI-WanVideoWrapper_jc`. All its node ids get a `_jc` suffix and its display names `(jc)` (e.g. `WanVideoSampler_jc`, "WanVideo Sampler (jc)"), and its torch custom ops live in the `wanvideo_jc` namespace, so the two don't clash. Use the `_jc` nodes together in a workflow: the model, embeds and sampler of one package don't mix with the other's. The example workflows other than the Wan-Animate-2 and SCAIL-2 ones still use the original node ids.
 
+## EverAnimate
+
+`WanVideo EverAnimate Sampler (jc)` runs [EverAnimate](https://github.com/vita-epfl/EverAnimate) with the jc wrapper's model, VAE and text loaders. It samples and decodes each chunk, keeps four identity anchors, passes the previous chunk's last clean latent directly to the next chunk, and refreshes CLIP Vision from the previous chunk's last frame. The existing model loader handles the original EverAnimate LoRA keys; no conversion is needed.
+
+- Use **Wan2.2-Animate-14B** and `everanimate/stage2_480p.safetensors` at strength **1.0**. Select the LoRA with `WanVideo Lora Select (jc)` and connect it to `WanVideo Model Loader (jc)`. Set `merge_loras=false` for scaled FP8 or INT8 models.
+- Connect `WANVAE`, `WANVIDEOTEXTEMBEDS`, `CLIP_VISION`, a reference image, preprocessed pose images and cropped face images. The plain `umt5-xxl-enc-fp8_e4m3fn.safetensors` works with the wrapper's T5 loader. It differs from the scaled encoder used by native ComfyUI's `CLIPLoader`.
+- Defaults match the reference inference settings: **832×480, 77 frames per chunk, 20 steps, CFG 1, Euler, shift 5**. The node supplies EverAnimate's sigma schedule explicitly. `unipc` and `dpm++` are optional experiments; a connected `sigmas` input overrides the default schedule.
+- Four frames overlap between chunks and are trimmed from subsequent chunks. Two chunks produce **150 frames**. Pose and face streams use the same frame offset and are extended with `pingpong`, `loop` or `hold` when necessary.
+- The first chunk uses four copies of the reference latent. Later chunks keep three individually encoded frames from the first generated chunk plus the original reference. `anchor_mode=user_image` keeps the four reference copies instead.
+- Block swap and model quantization use the existing loader settings. `force_offload=true` frees diffusion-model VRAM between chunks for VAE and CLIP Vision. `tiled_vae` reduces VAE memory use. Returned `images` connect directly to Video Combine; `last_chunk_latent` contains only the final chunk's video latents, with the four anchor slots removed.
+- This implements the released animation path. Background replacement masks, upstream resume files and Wan-Animate-2 models are not inputs to this node.
+
+Example: [wanvideo_EverAnimate_example_01.json](example_workflows/wanvideo_EverAnimate_example_01.json). Select the reference image and prepared pose/face videos before running. Start with the EverAnimate LoRA alone for comparison with the reference.
+
+CPU regression tests: `COMFYUI_PATH=/path/to/ComfyUI python tests/test_everanimate.py` (use ComfyUI's Python environment). They cover sigma values, Euler integration, control-frame selection, anchor offsets, persistent memory and chunk stitching.
+
 ## Wan-Animate-2, SCAIL-2 and INT8 ConvRot models
 
 - [Wan-Animate-2](https://github.com/Wan-Video/Wan-Animate-2) with the new `WanVideo Animate2 Embeds (Wan-Animate-2)` node: it takes the reference image and the driving video as is (no pose/face extraction) and works with the regular `WanVideo Sampler`. Supports the base and distilled models (`log_scale` -1.3 for the distilled one), CFG with upstream's skipped uncond block, windowed long generation like upstream, context windows, and caching the pose branch (it never changes during sampling) on CPU/GPU in bf16 or int8. See `example_workflows/wanvideo_WanAnimate2_example_01.json`.

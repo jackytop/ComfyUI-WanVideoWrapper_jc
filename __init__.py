@@ -50,6 +50,7 @@ OPTIONAL_MODULES = [
     (".SCAIL.nodes", "SCAIL"),
     (".LongCat.nodes", "LongCat"),
     (".LongVie2.nodes", "LongVie2"),
+    (".everanimate.nodes", "EverAnimate"),
 ]
 
 # This fork installs next to the original ComfyUI-WanVideoWrapper, so its node ids and display names get a suffix

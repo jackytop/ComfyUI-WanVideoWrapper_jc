@@ -1,0 +1,787 @@
+{
+  "nodes": [
+    {
+      "id": 1,
+      "type": "WanVideoModelLoader_jc",
+      "pos": [
+        400,
+        0
+      ],
+      "size": [
+        350,
+        360
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "compile_args",
+          "type": "WANCOMPILEARGS",
+          "link": null,
+          "shape": 7
+        },
+        {
+          "name": "block_swap_args",
+          "type": "BLOCKSWAPARGS",
+          "link": 2,
+          "shape": 7
+        },
+        {
+          "name": "lora",
+          "type": "WANVIDLORA",
+          "link": 1,
+          "shape": 7
+        },
+        {
+          "name": "vram_management_args",
+          "type": "VRAM_MANAGEMENTARGS",
+          "link": null,
+          "shape": 7
+        },
+        {
+          "name": "extra_model",
+          "type": "VACEPATH",
+          "link": null,
+          "shape": 7
+        },
+        {
+          "name": "fantasytalking_model",
+          "type": "FANTASYTALKINGMODEL",
+          "link": null,
+          "shape": 7
+        },
+        {
+          "name": "multitalk_model",
+          "type": "MULTITALKMODEL",
+          "link": null,
+          "shape": 7
+        },
+        {
+          "name": "fantasyportrait_model",
+          "type": "FANTASYPORTRAITMODEL",
+          "link": null,
+          "shape": 7
+        }
+      ],
+      "outputs": [
+        {
+          "name": "model",
+          "type": "WANVIDEOMODEL",
+          "links": [
+            3
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "WanVideoModelLoader_jc"
+      },
+      "widgets_values": [
+        "wan22_Animate\\Wan2_2-Animate-14B_fp8_scaled_e4m3fn_KJ_v2.safetensors",
+        "bf16",
+        "disabled",
+        "offload_device",
+        "sdpa",
+        "default"
+      ]
+    },
+    {
+      "id": 2,
+      "type": "WanVideoLoraSelect_jc",
+      "pos": [
+        0,
+        0
+      ],
+      "size": [
+        350,
+        360
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "prev_lora",
+          "type": "WANVIDLORA",
+          "link": null,
+          "shape": 7
+        },
+        {
+          "name": "blocks",
+          "type": "SELECTEDBLOCKS",
+          "link": null,
+          "shape": 7
+        }
+      ],
+      "outputs": [
+        {
+          "name": "lora",
+          "type": "WANVIDLORA",
+          "links": [
+            1
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "WanVideoLoraSelect_jc"
+      },
+      "widgets_values": [
+        "wan22_animate\\everanimate\\stage2_480p.safetensors",
+        1.0,
+        false,
+        false
+      ]
+    },
+    {
+      "id": 3,
+      "type": "WanVideoBlockSwap_jc",
+      "pos": [
+        0,
+        350
+      ],
+      "size": [
+        350,
+        360
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "block_swap_args",
+          "type": "BLOCKSWAPARGS",
+          "links": [
+            2
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "WanVideoBlockSwap_jc"
+      },
+      "widgets_values": [
+        20,
+        false,
+        false,
+        false,
+        0,
+        0,
+        false
+      ]
+    },
+    {
+      "id": 4,
+      "type": "WanVideoVAELoader_jc",
+      "pos": [
+        400,
+        420
+      ],
+      "size": [
+        350,
+        360
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "compile_args",
+          "type": "WANCOMPILEARGS",
+          "link": null,
+          "shape": 7
+        }
+      ],
+      "outputs": [
+        {
+          "name": "vae",
+          "type": "WANVAE",
+          "links": [
+            4
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "WanVideoVAELoader_jc"
+      },
+      "widgets_values": [
+        "wan2\\wan_2.1_vae.safetensors",
+        "bf16",
+        false,
+        false
+      ]
+    },
+    {
+      "id": 5,
+      "type": "WanVideoTextEncodeCached_jc",
+      "pos": [
+        800,
+        0
+      ],
+      "size": [
+        350,
+        360
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "extender_args",
+          "type": "WANVIDEOPROMPTEXTENDER_ARGS",
+          "link": null,
+          "shape": 7
+        }
+      ],
+      "outputs": [
+        {
+          "name": "text_embeds",
+          "type": "WANVIDEOTEXTEMBEDS",
+          "links": [
+            5
+          ],
+          "slot_index": 0
+        },
+        {
+          "name": "negative_text_embeds",
+          "type": "WANVIDEOTEXTEMBEDS",
+          "links": [],
+          "slot_index": 1
+        },
+        {
+          "name": "positive_prompt",
+          "type": "STRING",
+          "links": [],
+          "slot_index": 2
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "WanVideoTextEncodeCached_jc"
+      },
+      "widgets_values": [
+        "wan\\umt5-xxl-enc-fp8_e4m3fn.safetensors",
+        "bf16",
+        "A person is moving naturally, high quality video.",
+        "",
+        "disabled",
+        false,
+        "gpu"
+      ]
+    },
+    {
+      "id": 6,
+      "type": "CLIPVisionLoader",
+      "pos": [
+        800,
+        450
+      ],
+      "size": [
+        350,
+        360
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "CLIP_VISION",
+          "type": "CLIP_VISION",
+          "links": [
+            6
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "CLIPVisionLoader"
+      },
+      "widgets_values": [
+        "wan\\clip_vision_h.safetensors"
+      ]
+    },
+    {
+      "id": 7,
+      "type": "LoadImage",
+      "pos": [
+        0,
+        820
+      ],
+      "size": [
+        350,
+        360
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            7
+          ],
+          "slot_index": 0
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": [],
+          "slot_index": 1
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadImage"
+      },
+      "widgets_values": [
+        "reference.png",
+        "image"
+      ]
+    },
+    {
+      "id": 8,
+      "type": "VHS_LoadVideo",
+      "pos": [
+        400,
+        820
+      ],
+      "size": [
+        350,
+        360
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "meta_batch",
+          "type": "VHS_BatchManager",
+          "link": null,
+          "shape": 7
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": null,
+          "shape": 7
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            8
+          ],
+          "slot_index": 0
+        },
+        {
+          "name": "frame_count",
+          "type": "INT",
+          "links": [],
+          "slot_index": 1
+        },
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "links": [],
+          "slot_index": 2
+        },
+        {
+          "name": "video_info",
+          "type": "VHS_VIDEOINFO",
+          "links": [],
+          "slot_index": 3
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VHS_LoadVideo"
+      },
+      "widgets_values": {
+        "video": "pose.mp4",
+        "force_rate": 25,
+        "custom_width": 0,
+        "custom_height": 0,
+        "frame_load_cap": 150,
+        "skip_first_frames": 0,
+        "select_every_nth": 1,
+        "format": "AnimateDiff",
+        "videopreview": {
+          "hidden": true,
+          "paused": true,
+          "params": {}
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "VHS_LoadVideo",
+      "pos": [
+        800,
+        820
+      ],
+      "size": [
+        350,
+        360
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "meta_batch",
+          "type": "VHS_BatchManager",
+          "link": null,
+          "shape": 7
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": null,
+          "shape": 7
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            9
+          ],
+          "slot_index": 0
+        },
+        {
+          "name": "frame_count",
+          "type": "INT",
+          "links": [],
+          "slot_index": 1
+        },
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "links": [],
+          "slot_index": 2
+        },
+        {
+          "name": "video_info",
+          "type": "VHS_VIDEOINFO",
+          "links": [],
+          "slot_index": 3
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VHS_LoadVideo"
+      },
+      "widgets_values": {
+        "video": "face.mp4",
+        "force_rate": 25,
+        "custom_width": 0,
+        "custom_height": 0,
+        "frame_load_cap": 150,
+        "skip_first_frames": 0,
+        "select_every_nth": 1,
+        "format": "AnimateDiff",
+        "videopreview": {
+          "hidden": true,
+          "paused": true,
+          "params": {}
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "WanVideoEverAnimateSampler_jc",
+      "pos": [
+        1250,
+        220
+      ],
+      "size": [
+        400,
+        700
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "WANVIDEOMODEL",
+          "link": 3
+        },
+        {
+          "name": "vae",
+          "type": "WANVAE",
+          "link": 4
+        },
+        {
+          "name": "text_embeds",
+          "type": "WANVIDEOTEXTEMBEDS",
+          "link": 5
+        },
+        {
+          "name": "clip_vision",
+          "type": "CLIP_VISION",
+          "link": 6
+        },
+        {
+          "name": "reference_image",
+          "type": "IMAGE",
+          "link": 7
+        },
+        {
+          "name": "pose_images",
+          "type": "IMAGE",
+          "link": 8
+        },
+        {
+          "name": "face_images",
+          "type": "IMAGE",
+          "link": 9
+        },
+        {
+          "name": "cache_args",
+          "type": "CACHEARGS",
+          "link": null,
+          "shape": 7
+        },
+        {
+          "name": "feta_args",
+          "type": "FETAARGS",
+          "link": null,
+          "shape": 7
+        },
+        {
+          "name": "sigmas",
+          "type": "SIGMAS",
+          "link": null,
+          "shape": 7
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "links": [
+            10
+          ],
+          "slot_index": 0
+        },
+        {
+          "name": "last_chunk_latent",
+          "type": "LATENT",
+          "links": [],
+          "slot_index": 1
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "WanVideoEverAnimateSampler_jc"
+      },
+      "widgets_values": [
+        832,
+        480,
+        77,
+        2,
+        20,
+        1.0,
+        5.0,
+        0,
+        "fixed",
+        true,
+        false,
+        "euler",
+        42,
+        "pingpong",
+        "random_plus_user"
+      ]
+    },
+    {
+      "id": 11,
+      "type": "VHS_VideoCombine",
+      "pos": [
+        1700,
+        220
+      ],
+      "size": [
+        350,
+        360
+      ],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 10
+        },
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "link": null,
+          "shape": 7
+        },
+        {
+          "name": "meta_batch",
+          "type": "VHS_BatchManager",
+          "link": null,
+          "shape": 7
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": null,
+          "shape": 7
+        }
+      ],
+      "outputs": [
+        {
+          "name": "Filenames",
+          "type": "VHS_FILENAMES",
+          "links": [],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VHS_VideoCombine"
+      },
+      "widgets_values": {
+        "frame_rate": 25,
+        "loop_count": 0,
+        "filename_prefix": "EverAnimate_WanWrapper_JC",
+        "format": "video/h264-mp4",
+        "pingpong": false,
+        "save_output": true,
+        "pix_fmt": "yuv420p",
+        "crf": 19,
+        "save_metadata": true,
+        "trim_to_audio": false,
+        "videopreview": {
+          "hidden": true,
+          "paused": true,
+          "params": {}
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "Note",
+      "pos": [
+        1250,
+        900
+      ],
+      "size": [
+        560,
+        260
+      ],
+      "flags": {},
+      "order": 12,
+      "mode": 0,
+      "properties": {},
+      "widgets_values": [
+        "EverAnimate / WanVideoWrapper_jc\n\nSelect a reference image and preprocessed pose / face videos.\nWan2.2-Animate-14B + stage2_480p, LoRA strength 1.\nEuler, 20 steps, CFG 1, shift 5. Two 77-frame chunks -> 150 frames.\nUse all jc model / VAE / text nodes. CLIP Vision is refreshed internally.\nThe wrapper T5 loader uses the plain umt5-xxl-enc model.\nThis sampler includes decoding; connect images directly to Video Combine."
+      ]
+    }
+  ],
+  "links": [
+    [
+      1,
+      2,
+      0,
+      1,
+      2,
+      "WANVIDLORA"
+    ],
+    [
+      2,
+      3,
+      0,
+      1,
+      1,
+      "BLOCKSWAPARGS"
+    ],
+    [
+      3,
+      1,
+      0,
+      10,
+      0,
+      "WANVIDEOMODEL"
+    ],
+    [
+      4,
+      4,
+      0,
+      10,
+      1,
+      "WANVAE"
+    ],
+    [
+      5,
+      5,
+      0,
+      10,
+      2,
+      "WANVIDEOTEXTEMBEDS"
+    ],
+    [
+      6,
+      6,
+      0,
+      10,
+      3,
+      "CLIP_VISION"
+    ],
+    [
+      7,
+      7,
+      0,
+      10,
+      4,
+      "IMAGE"
+    ],
+    [
+      8,
+      8,
+      0,
+      10,
+      5,
+      "IMAGE"
+    ],
+    [
+      9,
+      9,
+      0,
+      10,
+      6,
+      "IMAGE"
+    ],
+    [
+      10,
+      10,
+      0,
+      11,
+      0,
+      "IMAGE"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.65,
+      "offset": [
+        40,
+        80
+      ]
+    }
+  },
+  "version": 0.4,
+  "last_node_id": 12,
+  "last_link_id": 10,
+  "id": "b9290ee0-b43b-494c-b82b-a79a3b4d8058",
+  "revision": 0
+}
